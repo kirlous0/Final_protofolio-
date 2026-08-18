@@ -251,6 +251,101 @@ export const api = {
     return res.json();
   },
 
+  // --------------------------------------------------
+  // GITHUB INGESTION & PIPELINE ENGINE
+  // --------------------------------------------------
+  async getGitHubStatus(): Promise<{ connectedUsername: string; hasCustomToken: boolean; isAuthenticated: boolean }> {
+    const res = await fetch('/api/github/status');
+    if (!res.ok) return { connectedUsername: 'waelkirlous', hasCustomToken: false, isAuthenticated: true };
+    return res.json();
+  },
+
+  async connectGitHub(username: string, token?: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch('/api/github/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, token }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to connect to GitHub');
+    }
+    return res.json();
+  },
+
+  async disconnectGitHub(): Promise<void> {
+    await fetch('/api/github/disconnect', { method: 'POST' });
+  },
+
+  async getGitHubRepos(username?: string): Promise<any[]> {
+    const url = username ? `/api/github/repos?username=${encodeURIComponent(username)}` : '/api/github/repos';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to discover GitHub repositories');
+    return res.json();
+  },
+
+  async getGitHubAiRecommendations(repos?: any[]): Promise<any[]> {
+    const res = await fetch('/api/github/recommend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repos }),
+    });
+    if (!res.ok) throw new Error('Failed to run AI repository recommendation');
+    return res.json();
+  },
+
+  async analyzeGitHubRepo(repoFullName: string): Promise<{ evidence: any; generatedProject: any }> {
+    const res = await fetch('/api/github/analyze-repo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoFullName }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to analyze repository evidence');
+    }
+    return res.json();
+  },
+
+  async runGitHubImportPipeline(params: {
+    repoFullName: string;
+    captureScreenshots?: boolean;
+    autoPublish?: boolean;
+  }): Promise<{ success: boolean; pipelineStatus: string; evidence: any; project: Project }> {
+    const res = await fetch('/api/github/import-pipeline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'GitHub import pipeline failed');
+    }
+    return res.json();
+  },
+
+  async checkGitHubSync(projectId: string): Promise<{ projectId: string; repoFullName: string; diff: any; currentEvidence: any }> {
+    const res = await fetch(`/api/github/sync-check/${projectId}`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'GitHub sync check failed');
+    }
+    return res.json();
+  },
+
+  async applyGitHubSync(projectId: string, currentEvidence?: any): Promise<{ success: boolean; updatedProject: Project }> {
+    const res = await fetch(`/api/github/sync-apply/${projectId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentEvidence }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to apply GitHub sync updates');
+    }
+    return res.json();
+  },
+
   async githubInspect(repoUrl: string): Promise<any> {
     const res = await fetch('/api/github/inspect', {
       method: 'POST',

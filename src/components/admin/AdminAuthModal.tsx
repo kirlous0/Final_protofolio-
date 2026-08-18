@@ -136,7 +136,7 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
               }`}
             >
               <Key className="h-3.5 w-3.5" />
-              <span>دخول المطور (Passkey)</span>
+              <span>دخول المطور المباشر</span>
             </button>
 
             <button
@@ -156,7 +156,7 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
             </button>
           </div>
 
-          {/* PRIMARY: Passkey / Quick Access Mode */}
+          {/* PRIMARY: Quick Access Mode */}
           {mode === 'passkey' && (
             <div className="space-y-4">
               {/* Instant 1-Click Access for Kirlous */}
@@ -192,11 +192,11 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
                 </span>
               </div>
 
-              {/* Passkey Input Form (Clean without secret hints) */}
+              {/* Password Input Form */}
               <form onSubmit={handleMasterKeySubmit} className="space-y-3">
                 <div>
                   <label className="block font-mono text-[11px] font-semibold uppercase tracking-wider mb-1 text-[#A1A1AA]">
-                    Developer Passkey
+                    رمز الدخول السري
                   </label>
                   <div className="relative">
                     <KeyRound className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
@@ -241,7 +241,7 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
                   <div className="flex items-start gap-2">
                     <Info className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
                     <p className="text-[11px] text-slate-300">
-                      Firebase يتطلب إضافة نطاق الموقع في Console. يمكنك استخدام <strong>رمز المطور (Passkey)</strong> بالأعلى للدخول فوراً بدون أي إعدادات!
+                      Firebase يتطلب إضافة نطاق الموقع في Console. يمكنك استخدام <strong>الدخول المباشر</strong> بالأعلى للدخول فوراً بدون أي إعدادات!
                     </p>
                   </div>
 

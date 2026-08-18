@@ -108,19 +108,42 @@ export async function seedFirestoreIfEmpty(): Promise<void> {
   }
 }
 
+// Helper for robust local storage caching during Firestore offline states
+function getLocalCache<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function setLocalCache<T>(key: string, value: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+const CACHE_PROJECTS_KEY = 'kw_projects_cache';
+const CACHE_PROFILE_KEY = 'kw_profile_cache';
+
 // ----------------------------------------------------
 // PROFILES
 // ----------------------------------------------------
 export async function getProfile(): Promise<Profile> {
+  const cached = getLocalCache<Profile>(CACHE_PROFILE_KEY, initialProfile);
   return safeFirestoreRead(
     async () => {
       const snap = await getDoc(doc(db, PROFILES_COLLECTION, PROFILE_DOC_ID));
       if (snap.exists()) {
-        return snap.data() as Profile;
+        const data = snap.data() as Profile;
+        setLocalCache(CACHE_PROFILE_KEY, data);
+        return data;
       }
-      return initialProfile;
+      return cached;
     },
-    initialProfile,
+    cached,
     'getProfile'
   );
 }
@@ -128,6 +151,7 @@ export async function getProfile(): Promise<Profile> {
 export async function updateProfile(profileData: Partial<Profile>): Promise<Profile> {
   const current = await getProfile();
   const updated = { ...current, ...profileData };
+  setLocalCache(CACHE_PROFILE_KEY, updated);
   try {
     await setDoc(doc(db, PROFILES_COLLECTION, PROFILE_DOC_ID), updated, { merge: true });
     await logActivity('PROFILE_UPDATED', 'profile', undefined, 'Updated developer profile details in Cloud Firestore.');
@@ -141,6 +165,7 @@ export async function updateProfile(profileData: Partial<Profile>): Promise<Prof
 // PROJECTS
 // ----------------------------------------------------
 export async function getProjects(filters?: { publishedOnly?: boolean }): Promise<Project[]> {
+  const cached = getLocalCache<Project[]>(CACHE_PROJECTS_KEY, initialProjects);
   return safeFirestoreRead(
     async () => {
       const colRef = collection(db, PROJECTS_COLLECTION);
@@ -150,17 +175,22 @@ export async function getProjects(filters?: { publishedOnly?: boolean }): Promis
       }
       const snap = await getDocs(q);
       if (snap.empty) {
-        return initialProjects;
+        return cached;
       }
       const items = snap.docs.map(d => ({ ...d.data(), id: d.id } as Project));
-      return items.sort((a, b) => (a.order || 0) - (b.order || 0));
+      const sorted = items.sort((a, b) => (a.order || 0) - (b.order || 0));
+      setLocalCache(CACHE_PROJECTS_KEY, sorted);
+      return sorted;
     },
-    initialProjects,
+    cached,
     'getProjects'
   );
 }
 
 export async function getProjectBySlug(slug: string): Promise<Project | null> {
+  const cachedProjects = getLocalCache<Project[]>(CACHE_PROJECTS_KEY, initialProjects);
+  const localMatch = cachedProjects.find(p => p.slug === slug) || null;
+
   return safeFirestoreRead(
     async () => {
       const q = query(collection(db, PROJECTS_COLLECTION), where('slug', '==', slug));
@@ -169,9 +199,9 @@ export async function getProjectBySlug(slug: string): Promise<Project | null> {
         const d = snap.docs[0];
         return { ...d.data(), id: d.id } as Project;
       }
-      return initialProjects.find(p => p.slug === slug) || null;
+      return localMatch;
     },
-    initialProjects.find(p => p.slug === slug) || null,
+    localMatch,
     'getProjectBySlug'
   );
 }
@@ -187,6 +217,9 @@ export async function createProject(projectData: Omit<Project, 'id' | 'createdAt
     updatedAt: new Date().toISOString(),
   };
 
+  const updatedList = [...existingProjects, fullProject];
+  setLocalCache(CACHE_PROJECTS_KEY, updatedList);
+
   try {
     await setDoc(doc(db, PROJECTS_COLLECTION, newId), fullProject);
     await logActivity('PROJECT_CREATED', 'project', newId, `Created project "${fullProject.title}" in Cloud Firestore.`);
@@ -197,47 +230,42 @@ export async function createProject(projectData: Omit<Project, 'id' | 'createdAt
 }
 
 export async function updateProject(id: string, patch: Partial<Project>): Promise<Project | null> {
-  const docRef = doc(db, PROJECTS_COLLECTION, id);
+  const currentProjects = await getProjects();
+  const existing = currentProjects.find(p => p.id === id);
+
+  const updated: Project = {
+    ...(existing || initialProjects.find(p => p.id === id) || ({} as Project)),
+    ...patch,
+    id,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const updatedList = currentProjects.map(p => (p.id === id ? updated : p));
+  setLocalCache(CACHE_PROJECTS_KEY, updatedList);
+
   try {
-    const snap = await getDoc(docRef);
-    let baseData: Partial<Project> = {};
-    if (snap.exists()) {
-      baseData = snap.data() as Project;
-    } else {
-      const existing = initialProjects.find(p => p.id === id);
-      if (existing) baseData = existing;
-    }
-
-    const updated: Project = {
-      ...(baseData as Project),
-      ...patch,
-      id,
-      updatedAt: new Date().toISOString(),
-    };
-
+    const docRef = doc(db, PROJECTS_COLLECTION, id);
     await setDoc(docRef, updated, { merge: true });
     await logActivity('PROJECT_UPDATED', 'project', id, `Updated project "${updated.title}" in Cloud Firestore.`);
-    return updated;
   } catch (e) {
-    console.warn('Update project fallback:', e);
-    const existing = initialProjects.find(p => p.id === id);
-    if (existing) {
-      return { ...existing, ...patch, updatedAt: new Date().toISOString() };
-    }
-    return null;
+    console.warn('Update project fallback notice:', e);
   }
+  return updated;
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
+  const currentProjects = await getProjects();
+  const updatedList = currentProjects.filter(p => p.id !== id);
+  setLocalCache(CACHE_PROJECTS_KEY, updatedList);
+
   try {
     const docRef = doc(db, PROJECTS_COLLECTION, id);
     await deleteDoc(docRef);
     await logActivity('PROJECT_DELETED', 'project', id, `Deleted project from Cloud Firestore.`);
-    return true;
   } catch (e) {
     console.warn('Delete project notice:', e);
-    return true;
   }
+  return true;
 }
 
 export async function toggleFeatureProject(id: string): Promise<Project | null> {

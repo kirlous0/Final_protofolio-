@@ -15,6 +15,7 @@ import {
   RefreshCw,
   LogOut,
   Flame,
+  Github,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Project, Profile, Message, ActivityLog, SkillCategory, Service } from '../types';
@@ -29,6 +30,7 @@ import { AdminProjectsManager } from './admin/AdminProjectsManager';
 import { AdminProjectEditor } from './admin/AdminProjectEditor';
 import { AdminAiStudio } from './admin/AdminAiStudio';
 import { AdminScreenshotEngine } from './admin/AdminScreenshotEngine';
+import { AdminGitHubImport } from './admin/AdminGitHubImport';
 import { AdminMessagesInbox } from './admin/AdminMessagesInbox';
 import { AdminProfileEditor } from './admin/AdminProfileEditor';
 import { AdminSkillsServices } from './admin/AdminSkillsServices';
@@ -124,6 +126,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const navTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'projects', label: 'Projects', icon: FolderKanban, badge: projects.length },
+    { id: 'github-import', label: 'GitHub Ingest', icon: Github, badgeColor: 'bg-amber-500 text-slate-950' },
     { id: 'ai-studio', label: 'AI Studio', icon: Sparkles },
     { id: 'screenshots', label: 'Screenshots', icon: Camera },
     {
@@ -329,6 +332,17 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   onCaptureScreenshots={proj => {
                     setActiveTab('screenshots');
                   }}
+                  onOpenGitHubImport={() => {
+                    setActiveTab('github-import');
+                  }}
+                />
+              )}
+
+              {activeTab === 'github-import' && (
+                <AdminGitHubImport
+                  onRefreshProjects={handleRefresh}
+                  onSelectProjectToEdit={proj => setEditingProject(proj)}
+                  existingProjects={projects}
                 />
               )}
 

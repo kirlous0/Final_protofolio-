@@ -47,7 +47,7 @@ export interface Project {
   longDescription: string;
   problem: string;
   solution: string;
-  features: string[];
+  features: Array<string | { value: string; verificationStatus?: 'verified' | 'strongly_inferred' | 'weakly_inferred'; source?: string }>;
   category: ProjectCategory;
   technologies: string[];
   verifiedTechnologies: VerifiedTechnology[];
@@ -68,6 +68,13 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
   aiAudit?: ProjectAiAudit;
+  // GitHub Ingestion & Sync metadata
+  githubRepoId?: number;
+  githubRepoFullName?: string;
+  githubDefaultBranch?: string;
+  githubLastCommitSha?: string;
+  githubLastSyncedAt?: string;
+  githubSyncStatus?: 'synced' | 'outdated' | 'manual';
 }
 
 export interface Profile {
@@ -177,3 +184,71 @@ export interface SiteSettings {
   defaultCoverViewport: 'desktop' | 'laptop' | 'tablet' | 'mobile';
   contactEmailNotification: boolean;
 }
+
+// --------------------------------------------------
+// GITHUB INGESTION & PIPELINE MODELS
+// --------------------------------------------------
+export interface GitHubRepository {
+  id: number;
+  name: string;
+  fullName: string;
+  description: string | null;
+  url: string;
+  htmlUrl: string;
+  homepage: string | null;
+  language: string | null;
+  languages: string[];
+  topics: string[];
+  stars: number;
+  forks: number;
+  openIssues: number;
+  defaultBranch: string;
+  isPrivate: boolean;
+  createdAt: string;
+  updatedAt: string;
+  pushedAt: string;
+  size: number;
+  category: ProjectCategory;
+  platform: PlatformType;
+  aiRecommendation?: {
+    score: number;
+    recommended: boolean;
+    why: string[];
+    strengths: string[];
+    portfolioRole?: string;
+  };
+}
+
+export interface GitHubEvidencePackage {
+  repoId: number;
+  repoFullName: string;
+  repoUrl: string;
+  defaultBranch: string;
+  commitSha: string;
+  treeFiles: string[];
+  manifests: {
+    packageJson?: any;
+    buildGradle?: string;
+  };
+  readmeContent: string;
+  detectedLiveUrl?: {
+    url: string;
+    source: string;
+    isValidated: boolean;
+    validationError?: string;
+  };
+  verifiedTechnologies: VerifiedTechnology[];
+  suggestedCategory: ProjectCategory;
+  suggestedPlatform: PlatformType;
+}
+
+export interface GitHubSyncDiff {
+  projectId: string;
+  repoFullName: string;
+  hasChanges: boolean;
+  addedTechnologies: string[];
+  removedTechnologies: string[];
+  readmeUpdated: boolean;
+  summary: string;
+}
+

@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Loader2,
   Check,
+  Github,
 } from 'lucide-react';
 import { Project } from '../../types';
 import { api } from '../../lib/api';
@@ -29,6 +30,7 @@ interface AdminProjectsManagerProps {
   onEditProject: (project: Project) => void;
   onRunAudit: (projectId: string) => void;
   onCaptureScreenshots: (project: Project) => void;
+  onOpenGitHubImport?: () => void;
 }
 
 export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
@@ -38,6 +40,7 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
   onEditProject,
   onRunAudit,
   onCaptureScreenshots,
+  onOpenGitHubImport,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -203,14 +206,27 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
           </p>
         </div>
 
-        <button
-          id="admin-create-project-btn"
-          onClick={onCreateProject}
-          className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-amber-400 shadow-xs"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Create New Project</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {onOpenGitHubImport && (
+            <button
+              id="admin-import-github-btn"
+              onClick={onOpenGitHubImport}
+              className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-400 transition-all hover:bg-amber-500/20 shadow-xs"
+            >
+              <Github className="h-4 w-4" />
+              <span>Import from GitHub</span>
+            </button>
+          )}
+
+          <button
+            id="admin-create-project-btn"
+            onClick={onCreateProject}
+            className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-amber-400 shadow-xs"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Create New Project</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter and Search Bar */}
@@ -326,6 +342,15 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
                       <span className="text-slate-400">{project.category}</span>
                       <span>•</span>
                       <span>{project.gallery.length} Viewports</span>
+                      {project.githubUrl && (
+                        <>
+                          <span>•</span>
+                          <span className="flex items-center gap-1 text-slate-400">
+                            <Github className="h-3 w-3 text-amber-500" />
+                            <span>Linked</span>
+                          </span>
+                        </>
+                      )}
                       {project.aiAudit && (
                         <>
                           <span>•</span>
