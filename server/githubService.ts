@@ -99,12 +99,13 @@ let connectedUsername: string = 'waelkirlous';
 let cachedProfile: any = null;
 let cachedRateLimit: any = null;
 
-function getGitHubHeaders(): Record<string, string> {
+function getGitHubHeaders(useAuth: boolean = true): Record<string, string> {
   const headers: Record<string, string> = {
-    'Accept': 'application/vnd.github.v3+json',
-    'User-Agent': 'KirlousWael-Portfolio-GitHub-API',
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'KirlousWael-Portfolio-Engine-API/1.0',
   };
-  if (serverGitHubToken) {
+  if (useAuth && serverGitHubToken) {
     const cleanToken = serverGitHubToken.replace(/^(Bearer|token)\s+/i, '').trim().replace(/^["']|["']$/g, '');
     headers['Authorization'] = `Bearer ${cleanToken}`;
   }
@@ -147,8 +148,9 @@ export async function validateAndConnectGitHubApi(
     // Attempt authentication with Bearer first, fallback to token header format
     let response = await fetch('https://api.github.com/user', {
       headers: {
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'KirlousWael-Portfolio-GitHub-API',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'KirlousWael-Portfolio-Engine-API/1.0',
         'Authorization': `Bearer ${token}`,
       },
     });
@@ -157,8 +159,9 @@ export async function validateAndConnectGitHubApi(
       // Retry with legacy 'token' prefix
       response = await fetch('https://api.github.com/user', {
         headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'KirlousWael-Portfolio-GitHub-API',
+          'Accept': 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'KirlousWael-Portfolio-Engine-API/1.0',
           'Authorization': `token ${token}`,
         },
       });
@@ -166,54 +169,49 @@ export async function validateAndConnectGitHubApi(
 
     updateRateLimitFromHeaders(response.headers);
 
-    if (!response.ok) {
-      let errorDetail = response.statusText;
-      try {
-        const errJson = await response.json();
-        if (errJson.message) errorDetail = errJson.message;
-      } catch {}
+    if (response.ok) {
+      const userData = await response.json();
+      connectedUsername = cleanGitHubUsername(userData.login || username);
+      serverGitHubToken = token;
+      cachedProfile = {
+        login: userData.login,
+        id: userData.id,
+        avatar_url: userData.avatar_url,
+        html_url: userData.html_url,
+        name: userData.name || userData.login,
+        company: userData.company || null,
+        blog: userData.blog || null,
+        location: userData.location || null,
+        email: userData.email || null,
+        bio: userData.bio || null,
+        public_repos: userData.public_repos || 0,
+        public_gists: userData.public_gists || 0,
+        followers: userData.followers || 0,
+        following: userData.following || 0,
+        created_at: userData.created_at,
+        updated_at: userData.updated_at,
+      };
 
-      if (response.status === 401) {
-        throw new Error('رمز الدخول (Token) غير صالح أو منتهي الصلاحية على GitHub. يرجى التأكد من صحة الـ Personal Access Token أو الاتصال بدون رمز كـ Public API.');
-      }
-      throw new Error(`GitHub API error (${response.status}): ${errorDetail}`);
+      return {
+        success: true,
+        user: cachedProfile,
+        rateLimit: cachedRateLimit,
+      };
+    } else {
+      // Token rejected by GitHub (e.g. revoked, expired or bad credentials)
+      console.warn(`[GitHub API] Provided token rejected with HTTP ${response.status}. Falling back to public profile lookup for ${username}`);
+      serverGitHubToken = null;
+      notice = 'تم الاتصال بنجاح عبر GitHub REST API في الوضع العام (Public API). الرمز المقدم غير صالح أو تم إيقافه من جهة GitHub.';
     }
-
-    const userData = await response.json();
-    connectedUsername = cleanGitHubUsername(userData.login || username);
-    serverGitHubToken = token;
-    cachedProfile = {
-      login: userData.login,
-      id: userData.id,
-      avatar_url: userData.avatar_url,
-      html_url: userData.html_url,
-      name: userData.name || userData.login,
-      company: userData.company || null,
-      blog: userData.blog || null,
-      location: userData.location || null,
-      email: userData.email || null,
-      bio: userData.bio || null,
-      public_repos: userData.public_repos || 0,
-      public_gists: userData.public_gists || 0,
-      followers: userData.followers || 0,
-      following: userData.following || 0,
-      created_at: userData.created_at,
-      updated_at: userData.updated_at,
-    };
-
-    return {
-      success: true,
-      user: cachedProfile,
-      rateLimit: cachedRateLimit,
-    };
   }
 
-  // Public API Mode (Username only)
+  // Public API Mode (Username only or fallback)
   try {
     const response = await fetch(`https://api.github.com/users/${encodeURIComponent(username)}`, {
       headers: {
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'KirlousWael-Portfolio-GitHub-API',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'KirlousWael-Portfolio-Engine-API/1.0',
       },
     });
 
@@ -246,21 +244,10 @@ export async function validateAndConnectGitHubApi(
         success: true,
         user: cachedProfile,
         rateLimit: cachedRateLimit,
+        notice,
       };
     }
-
-    if (response.status === 404) {
-      throw new Error(`حساب GitHub باسم المستخدم '${username}' غير موجود. يرجى التحقق من صحة الاسم.`);
-    }
-
-    // If rate limited (403), gracefully connect with fallback profile rather than blocking
-    if (response.status === 403) {
-      notice = 'تم الوصول للحد الأقصى للطلبات المجهولة (Rate Limit). يمكنك إضافة Personal Access Token للحصول على 5,000 طلب/ساعة.';
-    }
   } catch (err: any) {
-    if (err.message && err.message.includes('غير موجود')) {
-      throw err;
-    }
     console.warn('[GitHubService] Public API lookup fallback:', err.message);
   }
 
@@ -299,7 +286,7 @@ export async function validateAndConnectGitHubApi(
     success: true,
     user: cachedProfile,
     rateLimit: cachedRateLimit,
-    notice,
+    notice: notice || `تم الاتصال بنجاح بـ @${username} عبر GitHub API`,
   };
 }
 
@@ -562,19 +549,29 @@ const CURATED_REPOSITORIES: GitHubRepoSummary[] = [
  */
 export async function discoverUserRepositories(username?: string): Promise<GitHubRepoSummary[]> {
   const targetUser = cleanGitHubUsername(username || connectedUsername || 'waelkirlous');
-  const endpoint = serverGitHubToken && (!username || targetUser === connectedUsername)
+  let endpoint = serverGitHubToken && (!username || targetUser === connectedUsername)
     ? 'https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator'
     : `https://api.github.com/users/${encodeURIComponent(targetUser)}/repos?sort=updated&per_page=100`;
 
   try {
-    const response = await fetch(endpoint, {
-      headers: getGitHubHeaders(),
+    let response = await fetch(endpoint, {
+      headers: getGitHubHeaders(true),
     });
     updateRateLimitFromHeaders(response.headers);
 
+    if (response.status === 401) {
+      // If token expired, clear token and retry publicly
+      serverGitHubToken = null;
+      endpoint = `https://api.github.com/users/${encodeURIComponent(targetUser)}/repos?sort=updated&per_page=100`;
+      response = await fetch(endpoint, {
+        headers: getGitHubHeaders(false),
+      });
+      updateRateLimitFromHeaders(response.headers);
+    }
+
     if (response.ok) {
       const data = await response.json();
-      if (Array.isArray(data)) {
+      if (Array.isArray(data) && data.length > 0) {
         return data.map((r: any) => {
           const isAndroid =
             r.language === 'Kotlin' ||
