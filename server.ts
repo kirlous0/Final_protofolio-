@@ -486,20 +486,18 @@ async function startServer() {
 
   // Connect & Validate via GitHub REST API only
   app.post('/api/github/connect', async (req, res) => {
-    const { username, token } = req.body;
-    if (!username && !token) {
-      return res.status(400).json({ error: 'GitHub username or Personal Access Token (API Key) is required' });
-    }
-
+    const { username, token } = req.body || {};
     try {
-      const targetUser = username || 'waelkirlous';
-      const result = await validateAndConnectGitHubApi(targetUser, token);
+      const targetUser = username && typeof username === 'string' && username.trim() ? username.trim() : 'waelkirlous';
+      const cleanToken = token && typeof token === 'string' && token.trim() ? token.trim() : undefined;
+      const result = await validateAndConnectGitHubApi(targetUser, cleanToken);
       res.json({
         success: true,
-        message: `Successfully authenticated with GitHub REST API as ${result.user?.login || targetUser}`,
+        message: result.notice || `Successfully authenticated with GitHub REST API as @${result.user?.login || targetUser}`,
         user: result.user,
         rateLimit: result.rateLimit,
         status: getServerGitHubStatus(),
+        notice: result.notice,
       });
     } catch (err: any) {
       res.status(400).json({
