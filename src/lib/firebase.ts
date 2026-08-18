@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { getFirestore, initializeFirestore } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
+import { initializeFirestore, getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
@@ -16,12 +16,34 @@ const firebaseConfig = {
 };
 
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-
 export const auth = getAuth(app);
 
-// Use specified custom database ID if available, otherwise default
-export const db = firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firestoreDatabaseId !== '(default)'
-  ? getFirestore(app, firebaseConfigData.firestoreDatabaseId)
-  : getFirestore(app);
+const customDbId =
+  firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firestoreDatabaseId !== '(default)'
+    ? firebaseConfigData.firestoreDatabaseId
+    : undefined;
+
+// Use auto-detect long polling and ignoreUndefinedProperties for seamless iframe / proxy compatibility
+export const db = (() => {
+  try {
+    if (customDbId) {
+      return initializeFirestore(
+        app,
+        {
+          experimentalAutoDetectLongPolling: true,
+          ignoreUndefinedProperties: true,
+        },
+        customDbId
+      );
+    } else {
+      return initializeFirestore(app, {
+        experimentalAutoDetectLongPolling: true,
+        ignoreUndefinedProperties: true,
+      });
+    }
+  } catch {
+    return customDbId ? getFirestore(app, customDbId) : getFirestore(app);
+  }
+})();
 
 export const storage = getStorage(app);

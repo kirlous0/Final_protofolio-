@@ -17,15 +17,21 @@ import { AnimatedBackground } from './components/AnimatedBackground';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { AuthProvider } from './lib/authContext';
 import { seedFirestoreIfEmpty } from './lib/firestoreService';
+import {
+  initialProfile,
+  initialProjects,
+  initialSkillCategories,
+  initialServices,
+} from './data/initialData';
 import { Profile, Project, SkillCategory, Service } from './types';
 import { api } from './lib/api';
 
 function PortfolioApp() {
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [skills, setSkills] = useState<SkillCategory[]>([]);
-  const [services, setServices] = useState<Service[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<Profile>(initialProfile);
+  const [projects, setProjects] = useState<Project[]>(initialProjects);
+  const [skills, setSkills] = useState<SkillCategory[]>(initialSkillCategories);
+  const [services, setServices] = useState<Service[]>(initialServices);
+  const [isDataSyncing, setIsDataSyncing] = useState(true);
 
   const { effectiveTheme } = useTheme();
   const isDark = effectiveTheme === 'dark';
@@ -38,7 +44,9 @@ function PortfolioApp() {
 
   const loadInitialData = async () => {
     try {
-      await seedFirestoreIfEmpty();
+      // Trigger background seed non-blockingly
+      seedFirestoreIfEmpty().catch(() => {});
+
       const [profData, projData, skillData, srvData] = await Promise.all([
         api.getProfile(),
         api.getProjects({ publishedOnly: true }),
@@ -46,14 +54,14 @@ function PortfolioApp() {
         api.getServices(),
       ]);
 
-      setProfile(profData);
-      setProjects(projData);
-      setSkills(skillData);
-      setServices(srvData);
+      if (profData) setProfile(profData);
+      if (projData && projData.length > 0) setProjects(projData);
+      if (skillData && skillData.length > 0) setSkills(skillData);
+      if (srvData && srvData.length > 0) setServices(srvData);
     } catch (e) {
-      console.error('Failed to load portfolio data from Cloud Firestore', e);
+      console.warn('[Portfolio] Running with resilient local dataset:', e);
     } finally {
-      setLoading(false);
+      setIsDataSyncing(false);
     }
   };
 
@@ -74,23 +82,6 @@ function PortfolioApp() {
     setSelectedServicePreload(serviceTitle);
     handleNavigate('contact');
   };
-
-  if (loading || !profile) {
-    return (
-      <div
-        className={`flex h-screen w-full items-center justify-center transition-colors duration-300 ${
-          isDark ? 'bg-[#0B0C0E] text-[#71717A]' : 'bg-slate-50 text-slate-600'
-        }`}
-      >
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#00A3FF] border-t-transparent" />
-          <span className="font-mono text-xs font-semibold tracking-wider text-[#A1A1AA]">
-            CONNECTING TO CLOUD FIRESTORE...
-          </span>
-        </div>
-      </div>
-    );
-  }
 
   // If in Admin Control Center Mode
   if (isControlCenterOpen) {

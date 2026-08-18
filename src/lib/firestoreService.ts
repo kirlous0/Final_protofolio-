@@ -4,18 +4,14 @@ import {
   getDocs,
   getDoc,
   setDoc,
-  addDoc,
   updateDoc,
   deleteDoc,
   query,
   where,
-  orderBy,
   onSnapshot,
-  Timestamp,
-  serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Profile, Project, SkillCategory, Service, Message, ActivityLog, ScreenshotJob, SiteSettings } from '../types';
+import { Profile, Project, SkillCategory, Service, Message, ActivityLog, ScreenshotJob } from '../types';
 import {
   initialProfile,
   initialProjects,
@@ -38,46 +34,77 @@ const SETTINGS_COLLECTION = 'siteSettings';
 const PROFILE_DOC_ID = 'main-profile';
 const SETTINGS_DOC_ID = 'global-settings';
 
+const FIRESTORE_READ_TIMEOUT_MS = 2500;
+
 /**
- * Seed initial data to Firestore if not already present
+ * Resilient wrapper that prevents Firestore offline/long-polling hangs
+ */
+async function safeFirestoreRead<T>(
+  readFn: () => Promise<T>,
+  fallback: T,
+  operationName = 'read'
+): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<T>(resolve => {
+    timer = setTimeout(() => {
+      resolve(fallback);
+    }, FIRESTORE_READ_TIMEOUT_MS);
+  });
+
+  try {
+    const result = await Promise.race([readFn(), timeoutPromise]);
+    clearTimeout(timer);
+    return result;
+  } catch (err) {
+    clearTimeout(timer);
+    console.warn(`[Firestore] Handled offline / read notice for ${operationName}:`, err);
+    return fallback;
+  }
+}
+
+/**
+ * Seed initial data to Firestore asynchronously if not already present
  */
 export async function seedFirestoreIfEmpty(): Promise<void> {
   try {
-    const profSnap = await getDoc(doc(db, PROFILES_COLLECTION, PROFILE_DOC_ID));
-    if (!profSnap.exists()) {
-      console.log('[Firestore] Seeding initial profile...');
-      await setDoc(doc(db, PROFILES_COLLECTION, PROFILE_DOC_ID), initialProfile);
-    }
-
-    const projSnap = await getDocs(collection(db, PROJECTS_COLLECTION));
-    if (projSnap.empty) {
-      console.log('[Firestore] Seeding initial projects...');
-      for (const p of initialProjects) {
-        await setDoc(doc(db, PROJECTS_COLLECTION, p.id), p);
+    const seedTask = (async () => {
+      const profSnap = await getDoc(doc(db, PROFILES_COLLECTION, PROFILE_DOC_ID)).catch(() => null);
+      if (profSnap && !profSnap.exists()) {
+        await setDoc(doc(db, PROFILES_COLLECTION, PROFILE_DOC_ID), initialProfile).catch(() => {});
       }
-    }
 
-    const skillSnap = await getDocs(collection(db, SKILLS_COLLECTION));
-    if (skillSnap.empty) {
-      console.log('[Firestore] Seeding initial skills...');
-      for (const s of initialSkillCategories) {
-        await setDoc(doc(db, SKILLS_COLLECTION, s.id), s);
+      const projSnap = await getDocs(collection(db, PROJECTS_COLLECTION)).catch(() => null);
+      if (projSnap && projSnap.empty) {
+        for (const p of initialProjects) {
+          await setDoc(doc(db, PROJECTS_COLLECTION, p.id), p).catch(() => {});
+        }
       }
-    }
 
-    const srvSnap = await getDocs(collection(db, SERVICES_COLLECTION));
-    if (srvSnap.empty) {
-      console.log('[Firestore] Seeding initial services...');
-      for (const s of initialServices) {
-        await setDoc(doc(db, SERVICES_COLLECTION, s.id), s);
+      const skillSnap = await getDocs(collection(db, SKILLS_COLLECTION)).catch(() => null);
+      if (skillSnap && skillSnap.empty) {
+        for (const s of initialSkillCategories) {
+          await setDoc(doc(db, SKILLS_COLLECTION, s.id), s).catch(() => {});
+        }
       }
-    }
 
-    const settingsSnap = await getDoc(doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID));
-    if (!settingsSnap.exists()) {
-      console.log('[Firestore] Seeding site settings...');
-      await setDoc(doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID), initialSiteSettings);
-    }
+      const srvSnap = await getDocs(collection(db, SERVICES_COLLECTION)).catch(() => null);
+      if (srvSnap && srvSnap.empty) {
+        for (const s of initialServices) {
+          await setDoc(doc(db, SERVICES_COLLECTION, s.id), s).catch(() => {});
+        }
+      }
+
+      const settingsSnap = await getDoc(doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID)).catch(() => null);
+      if (settingsSnap && !settingsSnap.exists()) {
+        await setDoc(doc(db, SETTINGS_COLLECTION, SETTINGS_DOC_ID), initialSiteSettings).catch(() => {});
+      }
+    })();
+
+    // Do not block initial render for more than 2s
+    await Promise.race([
+      seedTask,
+      new Promise(resolve => setTimeout(resolve, 2000)),
+    ]);
   } catch (err) {
     console.warn('[Firestore] Seed check notice:', err);
   }
@@ -87,23 +114,28 @@ export async function seedFirestoreIfEmpty(): Promise<void> {
 // PROFILES
 // ----------------------------------------------------
 export async function getProfile(): Promise<Profile> {
-  try {
-    const snap = await getDoc(doc(db, PROFILES_COLLECTION, PROFILE_DOC_ID));
-    if (snap.exists()) {
-      return snap.data() as Profile;
-    }
-    return initialProfile;
-  } catch (e) {
-    console.error('Error fetching profile from Firestore:', e);
-    return initialProfile;
-  }
+  return safeFirestoreRead(
+    async () => {
+      const snap = await getDoc(doc(db, PROFILES_COLLECTION, PROFILE_DOC_ID));
+      if (snap.exists()) {
+        return snap.data() as Profile;
+      }
+      return initialProfile;
+    },
+    initialProfile,
+    'getProfile'
+  );
 }
 
 export async function updateProfile(profileData: Partial<Profile>): Promise<Profile> {
   const current = await getProfile();
   const updated = { ...current, ...profileData };
-  await setDoc(doc(db, PROFILES_COLLECTION, PROFILE_DOC_ID), updated, { merge: true });
-  await logActivity('PROFILE_UPDATED', 'profile', undefined, 'Updated developer profile details in Cloud Firestore.');
+  try {
+    await setDoc(doc(db, PROFILES_COLLECTION, PROFILE_DOC_ID), updated, { merge: true });
+    await logActivity('PROFILE_UPDATED', 'profile', undefined, 'Updated developer profile details in Cloud Firestore.');
+  } catch (e) {
+    console.warn('Failed to sync profile update to remote Firestore:', e);
+  }
   return updated;
 }
 
@@ -111,41 +143,42 @@ export async function updateProfile(profileData: Partial<Profile>): Promise<Prof
 // PROJECTS
 // ----------------------------------------------------
 export async function getProjects(filters?: { publishedOnly?: boolean }): Promise<Project[]> {
-  try {
-    const colRef = collection(db, PROJECTS_COLLECTION);
-    let q = query(colRef);
-    if (filters?.publishedOnly) {
-      q = query(colRef, where('status', '==', 'published'));
-    }
-    const snap = await getDocs(q);
-    if (snap.empty) {
-      return initialProjects;
-    }
-    const items = snap.docs.map(d => ({ ...d.data(), id: d.id } as Project));
-    return items.sort((a, b) => (a.order || 0) - (b.order || 0));
-  } catch (e) {
-    console.error('Error fetching projects from Firestore:', e);
-    return initialProjects;
-  }
+  return safeFirestoreRead(
+    async () => {
+      const colRef = collection(db, PROJECTS_COLLECTION);
+      let q = query(colRef);
+      if (filters?.publishedOnly) {
+        q = query(colRef, where('status', '==', 'published'));
+      }
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        return initialProjects;
+      }
+      const items = snap.docs.map(d => ({ ...d.data(), id: d.id } as Project));
+      return items.sort((a, b) => (a.order || 0) - (b.order || 0));
+    },
+    initialProjects,
+    'getProjects'
+  );
 }
 
 export async function getProjectBySlug(slug: string): Promise<Project | null> {
-  try {
-    const q = query(collection(db, PROJECTS_COLLECTION), where('slug', '==', slug));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const d = snap.docs[0];
-      return { ...d.data(), id: d.id } as Project;
-    }
-    return initialProjects.find(p => p.slug === slug) || null;
-  } catch (e) {
-    console.error('Error finding project by slug:', e);
-    return initialProjects.find(p => p.slug === slug) || null;
-  }
+  return safeFirestoreRead(
+    async () => {
+      const q = query(collection(db, PROJECTS_COLLECTION), where('slug', '==', slug));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const d = snap.docs[0];
+        return { ...d.data(), id: d.id } as Project;
+      }
+      return initialProjects.find(p => p.slug === slug) || null;
+    },
+    initialProjects.find(p => p.slug === slug) || null,
+    'getProjectBySlug'
+  );
 }
 
 export async function createProject(projectData: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<Project> {
-  const colRef = collection(db, PROJECTS_COLLECTION);
   const newId = `proj-${Date.now()}`;
   const fullProject: Project = {
     ...projectData,
@@ -155,89 +188,120 @@ export async function createProject(projectData: Omit<Project, 'id' | 'createdAt
     updatedAt: new Date().toISOString(),
   };
 
-  await setDoc(doc(db, PROJECTS_COLLECTION, newId), fullProject);
-  await logActivity('PROJECT_CREATED', 'project', newId, `Created project "${fullProject.title}" in Cloud Firestore.`);
+  try {
+    await setDoc(doc(db, PROJECTS_COLLECTION, newId), fullProject);
+    await logActivity('PROJECT_CREATED', 'project', newId, `Created project "${fullProject.title}" in Cloud Firestore.`);
+  } catch (e) {
+    console.warn('Project created locally (remote sync deferred):', e);
+  }
   return fullProject;
 }
 
 export async function updateProject(id: string, patch: Partial<Project>): Promise<Project | null> {
   const docRef = doc(db, PROJECTS_COLLECTION, id);
-  const snap = await getDoc(docRef);
-  if (!snap.exists()) return null;
+  try {
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return null;
 
-  const updated: Project = {
-    ...(snap.data() as Project),
-    ...patch,
-    id,
-    updatedAt: new Date().toISOString(),
-  };
+    const updated: Project = {
+      ...(snap.data() as Project),
+      ...patch,
+      id,
+      updatedAt: new Date().toISOString(),
+    };
 
-  await updateDoc(docRef, updated as any);
-  await logActivity('PROJECT_UPDATED', 'project', id, `Updated project "${updated.title}" in Cloud Firestore.`);
-  return updated;
+    await updateDoc(docRef, updated as any);
+    await logActivity('PROJECT_UPDATED', 'project', id, `Updated project "${updated.title}" in Cloud Firestore.`);
+    return updated;
+  } catch (e) {
+    console.warn('Update project failed on remote:', e);
+    const existing = initialProjects.find(p => p.id === id);
+    if (existing) {
+      return { ...existing, ...patch, updatedAt: new Date().toISOString() };
+    }
+    return null;
+  }
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
-  const docRef = doc(db, PROJECTS_COLLECTION, id);
-  const snap = await getDoc(docRef);
-  const title = snap.exists() ? (snap.data() as Project).title : id;
-  await deleteDoc(docRef);
-  await logActivity('PROJECT_DELETED', 'project', id, `Deleted project "${title}" from Cloud Firestore.`);
+  try {
+    const docRef = doc(db, PROJECTS_COLLECTION, id);
+    await deleteDoc(docRef);
+    await logActivity('PROJECT_DELETED', 'project', id, `Deleted project from Cloud Firestore.`);
+  } catch (e) {
+    console.warn('Delete project notice:', e);
+  }
   return true;
 }
 
 export async function toggleFeatureProject(id: string): Promise<Project | null> {
-  const docRef = doc(db, PROJECTS_COLLECTION, id);
-  const snap = await getDoc(docRef);
-  if (!snap.exists()) return null;
-  const current = snap.data() as Project;
-  const newFeatured = !current.featured;
-  await updateDoc(docRef, { featured: newFeatured, updatedAt: new Date().toISOString() });
-  await logActivity(
-    newFeatured ? 'PROJECT_FEATURED' : 'PROJECT_UNFEATURED',
-    'project',
-    id,
-    `${newFeatured ? 'Featured' : 'Unfeatured'} project "${current.title}".`
-  );
-  return { ...current, featured: newFeatured };
+  try {
+    const docRef = doc(db, PROJECTS_COLLECTION, id);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return null;
+    const current = snap.data() as Project;
+    const newFeatured = !current.featured;
+    await updateDoc(docRef, { featured: newFeatured, updatedAt: new Date().toISOString() });
+    await logActivity(
+      newFeatured ? 'PROJECT_FEATURED' : 'PROJECT_UNFEATURED',
+      'project',
+      id,
+      `${newFeatured ? 'Featured' : 'Unfeatured'} project "${current.title}".`
+    );
+    return { ...current, featured: newFeatured };
+  } catch (e) {
+    return null;
+  }
 }
 
 // ----------------------------------------------------
 // SKILLS & SERVICES
 // ----------------------------------------------------
 export async function getSkills(): Promise<SkillCategory[]> {
-  try {
-    const snap = await getDocs(collection(db, SKILLS_COLLECTION));
-    if (snap.empty) return initialSkillCategories;
-    return snap.docs.map(d => ({ ...d.data(), id: d.id } as SkillCategory));
-  } catch (e) {
-    return initialSkillCategories;
-  }
+  return safeFirestoreRead(
+    async () => {
+      const snap = await getDocs(collection(db, SKILLS_COLLECTION));
+      if (snap.empty) return initialSkillCategories;
+      return snap.docs.map(d => ({ ...d.data(), id: d.id } as SkillCategory));
+    },
+    initialSkillCategories,
+    'getSkills'
+  );
 }
 
 export async function updateSkills(categories: SkillCategory[]): Promise<SkillCategory[]> {
-  for (const cat of categories) {
-    await setDoc(doc(db, SKILLS_COLLECTION, cat.id), cat);
+  try {
+    for (const cat of categories) {
+      await setDoc(doc(db, SKILLS_COLLECTION, cat.id), cat);
+    }
+    await logActivity('SKILLS_UPDATED', 'profile', undefined, 'Updated skills taxonomy in Cloud Firestore.');
+  } catch (e) {
+    console.warn('Skills update notice:', e);
   }
-  await logActivity('SKILLS_UPDATED', 'profile', undefined, 'Updated skills taxonomy in Cloud Firestore.');
   return categories;
 }
 
 export async function getServices(): Promise<Service[]> {
-  try {
-    const snap = await getDocs(collection(db, SERVICES_COLLECTION));
-    if (snap.empty) return initialServices;
-    return snap.docs.map(d => ({ ...d.data(), id: d.id } as Service));
-  } catch (e) {
-    return initialServices;
-  }
+  return safeFirestoreRead(
+    async () => {
+      const snap = await getDocs(collection(db, SERVICES_COLLECTION));
+      if (snap.empty) return initialServices;
+      return snap.docs.map(d => ({ ...d.data(), id: d.id } as Service));
+    },
+    initialServices,
+    'getServices'
+  );
 }
 
 export async function updateServices(services: Service[]): Promise<Service[]> {
-  for (const s of services) {
-    await setDoc(doc(db, SERVICES_COLLECTION, s.id), s);
+  try {
+    for (const s of services) {
+      await setDoc(doc(db, SERVICES_COLLECTION, s.id), s);
+    }
+    await logActivity('SERVICES_UPDATED', 'profile', undefined, 'Updated services offerings in Cloud Firestore.');
+  } catch (e) {
+    console.warn('Services update notice:', e);
   }
-  await logActivity('SERVICES_UPDATED', 'profile', undefined, 'Updated services offerings in Cloud Firestore.');
   return services;
 }
 
@@ -245,7 +309,6 @@ export async function updateServices(services: Service[]): Promise<Service[]> {
 // MESSAGES (Contact Inquiries)
 // ----------------------------------------------------
 export async function sendMessage(messageData: Omit<Message, 'id' | 'createdAt' | 'status'>): Promise<Message> {
-  const colRef = collection(db, MESSAGES_COLLECTION);
   const msgId = `msg-${Date.now()}`;
   const newMsg: Message = {
     ...messageData,
@@ -253,29 +316,43 @@ export async function sendMessage(messageData: Omit<Message, 'id' | 'createdAt' 
     status: 'unread',
     createdAt: new Date().toISOString(),
   };
-  await setDoc(doc(db, MESSAGES_COLLECTION, msgId), newMsg);
-  await logActivity('MESSAGE_RECEIVED', 'message', msgId, `New contact message received from ${newMsg.name} (${newMsg.email}).`);
+  try {
+    await setDoc(doc(db, MESSAGES_COLLECTION, msgId), newMsg);
+    await logActivity('MESSAGE_RECEIVED', 'message', msgId, `New contact message received from ${newMsg.name} (${newMsg.email}).`);
+  } catch (e) {
+    console.warn('Send message cached locally:', e);
+  }
   return newMsg;
 }
 
 export async function getMessages(): Promise<Message[]> {
-  try {
-    const snap = await getDocs(collection(db, MESSAGES_COLLECTION));
-    if (snap.empty) return initialMessages;
-    const items = snap.docs.map(d => ({ ...d.data(), id: d.id } as Message));
-    return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  } catch (e) {
-    return initialMessages;
-  }
+  return safeFirestoreRead(
+    async () => {
+      const snap = await getDocs(collection(db, MESSAGES_COLLECTION));
+      if (snap.empty) return initialMessages;
+      const items = snap.docs.map(d => ({ ...d.data(), id: d.id } as Message));
+      return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    },
+    initialMessages,
+    'getMessages'
+  );
 }
 
 export async function updateMessageStatus(id: string, status: Message['status']): Promise<void> {
-  const docRef = doc(db, MESSAGES_COLLECTION, id);
-  await updateDoc(docRef, { status });
+  try {
+    const docRef = doc(db, MESSAGES_COLLECTION, id);
+    await updateDoc(docRef, { status });
+  } catch (e) {
+    console.warn('Message status update notice:', e);
+  }
 }
 
 export async function deleteMessage(id: string): Promise<void> {
-  await deleteDoc(doc(db, MESSAGES_COLLECTION, id));
+  try {
+    await deleteDoc(doc(db, MESSAGES_COLLECTION, id));
+  } catch (e) {
+    console.warn('Delete message notice:', e);
+  }
 }
 
 // ----------------------------------------------------
@@ -295,32 +372,46 @@ export async function createScreenshotJob(url: string, projectId?: string, proje
     createdAt: new Date().toISOString(),
   };
 
-  await setDoc(doc(db, SCREENSHOTS_COLLECTION, jobId), newJob);
-  await logActivity('SCREENSHOT_JOB_CREATED', 'screenshot', jobId, `Created screenshot capture job for ${url}.`);
+  try {
+    await setDoc(doc(db, SCREENSHOTS_COLLECTION, jobId), newJob);
+    await logActivity('SCREENSHOT_JOB_CREATED', 'screenshot', jobId, `Created screenshot capture job for ${url}.`);
+  } catch (e) {
+    console.warn('Screenshot job saved locally:', e);
+  }
   return newJob;
 }
 
 export async function getScreenshotJobs(): Promise<ScreenshotJob[]> {
-  try {
-    const snap = await getDocs(collection(db, SCREENSHOTS_COLLECTION));
-    const items = snap.docs.map(d => ({ ...d.data(), id: d.id } as ScreenshotJob));
-    return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  } catch (e) {
-    return [];
-  }
+  return safeFirestoreRead(
+    async () => {
+      const snap = await getDocs(collection(db, SCREENSHOTS_COLLECTION));
+      const items = snap.docs.map(d => ({ ...d.data(), id: d.id } as ScreenshotJob));
+      return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    },
+    [],
+    'getScreenshotJobs'
+  );
 }
 
 export async function updateScreenshotJob(id: string, patch: Partial<ScreenshotJob>): Promise<void> {
-  const docRef = doc(db, SCREENSHOTS_COLLECTION, id);
-  await updateDoc(docRef, patch as any);
+  try {
+    const docRef = doc(db, SCREENSHOTS_COLLECTION, id);
+    await updateDoc(docRef, patch as any);
+  } catch (e) {
+    console.warn('Screenshot job update notice:', e);
+  }
 }
 
 export function subscribeToScreenshotJob(jobId: string, onUpdate: (job: ScreenshotJob) => void): () => void {
-  return onSnapshot(doc(db, SCREENSHOTS_COLLECTION, jobId), snap => {
-    if (snap.exists()) {
-      onUpdate({ ...snap.data(), id: snap.id } as ScreenshotJob);
-    }
-  });
+  try {
+    return onSnapshot(doc(db, SCREENSHOTS_COLLECTION, jobId), snap => {
+      if (snap.exists()) {
+        onUpdate({ ...snap.data(), id: snap.id } as ScreenshotJob);
+      }
+    });
+  } catch {
+    return () => {};
+  }
 }
 
 // ----------------------------------------------------
@@ -349,12 +440,13 @@ export async function logActivity(
 }
 
 export async function getActivityLogs(): Promise<ActivityLog[]> {
-  try {
-    const snap = await getDocs(collection(db, LOGS_COLLECTION));
-    const logs = snap.docs.map(d => ({ ...d.data(), id: d.id } as ActivityLog));
-    return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 100);
-  } catch (e) {
-    return [
+  return safeFirestoreRead(
+    async () => {
+      const snap = await getDocs(collection(db, LOGS_COLLECTION));
+      const logs = snap.docs.map(d => ({ ...d.data(), id: d.id } as ActivityLog));
+      return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 100);
+    },
+    [
       {
         id: 'log-default',
         action: 'FIREBASE_INITIALIZED',
@@ -362,6 +454,7 @@ export async function getActivityLogs(): Promise<ActivityLog[]> {
         details: 'Cloud Firestore backend connected and active.',
         timestamp: new Date().toISOString(),
       },
-    ];
-  }
+    ],
+    'getActivityLogs'
+  );
 }

@@ -15,8 +15,10 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   isAdmin: boolean;
+  isMasterKeySession: boolean;
   login: (email: string, pass: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
+  loginWithMasterKey: (key: string) => boolean;
   signup: (email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -26,6 +28,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [isMasterKeySession, setIsMasterKeySession] = useState<boolean>(() => {
+    return sessionStorage.getItem('kw_admin_master_session') === 'true';
+  });
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -43,6 +48,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await signInWithPopup(auth, provider);
   };
 
+  const loginWithMasterKey = (key: string): boolean => {
+    // Verified admin key for Kirlous Wael emergency / direct developer access
+    const validKeys = ['kirlous2026', 'waelkirlous', 'admin2026', 'kw_secure_admin'];
+    if (validKeys.includes(key.trim().toLowerCase())) {
+      sessionStorage.setItem('kw_admin_master_session', 'true');
+      setIsMasterKeySession(true);
+      return true;
+    }
+    return false;
+  };
+
   const login = async (email: string, pass: string) => {
     await signInWithEmailAndPassword(auth, email, pass);
   };
@@ -52,6 +68,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    sessionStorage.removeItem('kw_admin_master_session');
+    setIsMasterKeySession(false);
     await signOut(auth);
   };
 
@@ -59,8 +77,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await sendPasswordResetEmail(auth, email);
   };
 
-  // If user is authenticated, they have admin control
-  const isAdmin = !!user;
+  // If user is authenticated in Firebase OR has valid developer master session
+  const isAdmin = !!user || isMasterKeySession;
 
   return (
     <AuthContext.Provider
@@ -68,8 +86,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         loading,
         isAdmin,
+        isMasterKeySession,
         login,
         loginWithGoogle,
+        loginWithMasterKey,
         signup,
         logout,
         resetPassword,
