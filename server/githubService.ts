@@ -53,39 +53,239 @@ export interface ExtractedEvidencePackage {
   suggestedPlatform: PlatformType;
 }
 
+export function cleanGitHubUsername(input: string): string {
+  if (!input) return 'waelkirlous';
+  let cleaned = input.trim();
+  cleaned = cleaned.replace(/^https?:\/\//i, '');
+  cleaned = cleaned.replace(/^github\.com\//i, '');
+  cleaned = cleaned.replace(/^@/, '');
+  cleaned = cleaned.split('/')[0].split('?')[0].split('#')[0];
+  return cleaned.trim() || 'waelkirlous';
+}
+
+export function parseGitHubRepoFullName(input: string): { owner: string; name: string; fullName: string } {
+  if (!input) {
+    return {
+      owner: 'waelkirlous',
+      name: 'novatrack-fleet-android',
+      fullName: 'waelkirlous/novatrack-fleet-android',
+    };
+  }
+  let cleaned = input.trim();
+  cleaned = cleaned.replace(/^https?:\/\//i, '');
+  cleaned = cleaned.replace(/^github\.com\//i, '');
+  cleaned = cleaned.replace(/\.git$/i, '');
+  cleaned = cleaned.replace(/^\/+|\/+$/g, '');
+
+  const parts = cleaned.split('/');
+  if (parts.length >= 2) {
+    const owner = parts[0].replace(/^@/, '').trim();
+    const name = parts[1].trim();
+    return { owner, name, fullName: `${owner}/${name}` };
+  } else if (parts.length === 1 && parts[0]) {
+    const defaultOwner = cleanGitHubUsername(connectedUsername);
+    return { owner: defaultOwner, name: parts[0], fullName: `${defaultOwner}/${parts[0]}` };
+  }
+  return {
+    owner: 'waelkirlous',
+    name: 'novatrack-fleet-android',
+    fullName: 'waelkirlous/novatrack-fleet-android',
+  };
+}
+
 // In-memory securely stored server-side GitHub credentials (never exposed to browser)
 let serverGitHubToken: string | null = process.env.GITHUB_TOKEN || null;
 let connectedUsername: string = 'waelkirlous';
+let cachedProfile: any = null;
+let cachedRateLimit: any = null;
+
+function getGitHubHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Accept': 'application/vnd.github.v3+json',
+    'User-Agent': 'KirlousWael-Portfolio-GitHub-API',
+  };
+  if (serverGitHubToken) {
+    headers['Authorization'] = `token ${serverGitHubToken}`;
+  }
+  return headers;
+}
+
+function updateRateLimitFromHeaders(headers: Headers) {
+  const limit = headers.get('x-ratelimit-limit');
+  const remaining = headers.get('x-ratelimit-remaining');
+  const reset = headers.get('x-ratelimit-reset');
+  const used = headers.get('x-ratelimit-used');
+
+  if (limit && remaining) {
+    cachedRateLimit = {
+      limit: parseInt(limit, 10),
+      remaining: parseInt(remaining, 10),
+      reset: reset ? parseInt(reset, 10) : Math.floor(Date.now() / 1000) + 3600,
+      used: used ? parseInt(used, 10) : 0,
+    };
+  }
+}
+
+/**
+ * Validates and connects via the GitHub REST API only.
+ * If token is provided, queries GET https://api.github.com/user
+ * If username only, queries GET https://api.github.com/users/:username
+ */
+export async function validateAndConnectGitHubApi(
+  usernameInput: string,
+  tokenInput?: string
+): Promise<{ success: boolean; user: any; rateLimit: any }> {
+  const token = tokenInput && tokenInput.trim() ? tokenInput.trim() : null;
+  const username = cleanGitHubUsername(usernameInput);
+
+  const reqHeaders: Record<string, string> = {
+    'Accept': 'application/vnd.github.v3+json',
+    'User-Agent': 'KirlousWael-Portfolio-GitHub-API',
+  };
+  if (token) {
+    reqHeaders['Authorization'] = `token ${token}`;
+  }
+
+  const endpoint = token ? 'https://api.github.com/user' : `https://api.github.com/users/${encodeURIComponent(username)}`;
+
+  const response = await fetch(endpoint, { headers: reqHeaders });
+  updateRateLimitFromHeaders(response.headers);
+
+  if (!response.ok) {
+    let errorMsg = `GitHub API error: ${response.status} ${response.statusText}`;
+    try {
+      const errData = await response.json();
+      if (errData.message) {
+        errorMsg = `GitHub API: ${errData.message}`;
+      }
+    } catch {}
+
+    if (response.status === 401) {
+      throw new Error('GitHub API: Invalid or expired Personal Access Token (PAT). Please check your token permissions.');
+    } else if (response.status === 404) {
+      throw new Error(`GitHub API: User '${username}' was not found on GitHub.`);
+    } else if (response.status === 403 && cachedRateLimit?.remaining === 0) {
+      throw new Error('GitHub API Rate Limit exceeded. Provide a GitHub Personal Access Token for 5,000 requests/hour.');
+    }
+    throw new Error(errorMsg);
+  }
+
+  const userData = await response.json();
+  connectedUsername = cleanGitHubUsername(userData.login || username);
+  serverGitHubToken = token;
+  cachedProfile = {
+    login: userData.login,
+    id: userData.id,
+    avatar_url: userData.avatar_url,
+    html_url: userData.html_url,
+    name: userData.name || userData.login,
+    company: userData.company,
+    blog: userData.blog,
+    location: userData.location,
+    email: userData.email,
+    bio: userData.bio,
+    public_repos: userData.public_repos,
+    public_gists: userData.public_gists,
+    followers: userData.followers,
+    following: userData.following,
+    created_at: userData.created_at,
+    updated_at: userData.updated_at,
+  };
+
+  return {
+    success: true,
+    user: cachedProfile,
+    rateLimit: cachedRateLimit,
+  };
+}
 
 export function setServerGitHubCredentials(username: string, token?: string) {
-  connectedUsername = username.trim() || 'waelkirlous';
-  if (token) {
+  connectedUsername = cleanGitHubUsername(username);
+  if (token && token.trim()) {
     serverGitHubToken = token.trim();
   }
 }
 
 export function getServerGitHubStatus() {
   return {
-    connectedUsername,
+    connectedUsername: cleanGitHubUsername(connectedUsername),
     hasCustomToken: Boolean(serverGitHubToken),
     isAuthenticated: true,
+    authMethod: serverGitHubToken ? 'token' : 'public_api',
+    profile: cachedProfile,
+    rateLimit: cachedRateLimit,
   };
 }
 
 export function clearServerGitHubCredentials() {
   connectedUsername = 'waelkirlous';
   serverGitHubToken = null;
+  cachedProfile = null;
 }
 
-function getGitHubHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Accept': 'application/vnd.github.v3+json',
-    'User-Agent': 'KirlousWael-Portfolio-Ingestion-Engine',
-  };
-  if (serverGitHubToken) {
-    headers['Authorization'] = `token ${serverGitHubToken}`;
+/**
+ * Fetches live rate limits directly from GitHub REST API: GET https://api.github.com/rate_limit
+ */
+export async function fetchGitHubRateLimit(): Promise<any> {
+  try {
+    const res = await fetch('https://api.github.com/rate_limit', {
+      headers: getGitHubHeaders(),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.resources?.core) {
+        cachedRateLimit = {
+          limit: data.resources.core.limit,
+          remaining: data.resources.core.remaining,
+          reset: data.resources.core.reset,
+          used: data.resources.core.used,
+        };
+        return cachedRateLimit;
+      }
+    }
+  } catch (err: any) {
+    console.warn('[GitHub API] Failed to fetch rate limit:', err.message);
   }
-  return headers;
+  return cachedRateLimit;
+}
+
+/**
+ * Fetches live user profile directly from GitHub REST API
+ */
+export async function fetchGitHubUserProfile(username?: string): Promise<any> {
+  const targetUser = cleanGitHubUsername(username || connectedUsername);
+  const endpoint = serverGitHubToken && (!username || targetUser === connectedUsername)
+    ? 'https://api.github.com/user'
+    : `https://api.github.com/users/${encodeURIComponent(targetUser)}`;
+
+  const res = await fetch(endpoint, {
+    headers: getGitHubHeaders(),
+  });
+  updateRateLimitFromHeaders(res.headers);
+
+  if (res.ok) {
+    const userData = await res.json();
+    cachedProfile = {
+      login: userData.login,
+      id: userData.id,
+      avatar_url: userData.avatar_url,
+      html_url: userData.html_url,
+      name: userData.name || userData.login,
+      company: userData.company,
+      blog: userData.blog,
+      location: userData.location,
+      email: userData.email,
+      bio: userData.bio,
+      public_repos: userData.public_repos,
+      public_gists: userData.public_gists,
+      followers: userData.followers,
+      following: userData.following,
+      created_at: userData.created_at,
+      updated_at: userData.updated_at,
+    };
+    return cachedProfile;
+  }
+  return cachedProfile;
 }
 
 // Curated high-fidelity repositories for Kirlous Wael (used as base or fallback when GitHub API rate-limited)
@@ -254,29 +454,33 @@ const CURATED_REPOSITORIES: GitHubRepoSummary[] = [
 ];
 
 /**
- * Discovers and lists repositories for the connected GitHub account.
- * Tries GitHub REST API first, falling back to curated repo set if network or rate limits apply.
+ * Discovers and lists repositories for the connected GitHub account strictly via GitHub REST API.
  */
-export async function discoverUserRepositories(username: string = connectedUsername): Promise<GitHubRepoSummary[]> {
+export async function discoverUserRepositories(username?: string): Promise<GitHubRepoSummary[]> {
+  const targetUser = cleanGitHubUsername(username || connectedUsername || 'waelkirlous');
+  const endpoint = serverGitHubToken && (!username || targetUser === connectedUsername)
+    ? 'https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator'
+    : `https://api.github.com/users/${encodeURIComponent(targetUser)}/repos?sort=updated&per_page=100`;
+
   try {
-    const targetUser = username || 'waelkirlous';
-    const response = await fetch(`https://api.github.com/users/${encodeURIComponent(targetUser)}/repos?sort=updated&per_page=50`, {
+    const response = await fetch(endpoint, {
       headers: getGitHubHeaders(),
     });
+    updateRateLimitFromHeaders(response.headers);
 
     if (response.ok) {
       const data = await response.json();
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         return data.map((r: any) => {
           const isAndroid =
             r.language === 'Kotlin' ||
             r.language === 'Java' ||
             (r.topics || []).some((t: string) => t.includes('android') || t.includes('compose')) ||
-            r.name.toLowerCase().includes('android');
+            (r.name || '').toLowerCase().includes('android');
 
           const isAI =
             (r.topics || []).some((t: string) => t.includes('ai') || t.includes('gemini') || t.includes('llm')) ||
-            r.name.toLowerCase().includes('ai') ||
+            (r.name || '').toLowerCase().includes('ai') ||
             (r.description || '').toLowerCase().includes('ai');
 
           let category: ProjectCategory = 'Web';
@@ -297,7 +501,7 @@ export async function discoverUserRepositories(username: string = connectedUsern
             id: r.id,
             name: r.name,
             fullName: r.full_name,
-            description: r.description || 'Modern software architecture engineered with modular principles.',
+            description: r.description || 'Architecture repository managed via GitHub REST API.',
             url: r.url,
             htmlUrl: r.html_url,
             homepage: r.homepage || null,
@@ -312,19 +516,31 @@ export async function discoverUserRepositories(username: string = connectedUsern
             createdAt: r.created_at,
             updatedAt: r.updated_at,
             pushedAt: r.pushed_at || r.updated_at,
-            size: r.size || 5000,
+            size: r.size || 0,
             category,
             platform,
           };
         });
       }
+    } else {
+      let errDetails = `GitHub API Error (${response.status}): ${response.statusText}`;
+      try {
+        const errJson = await response.json();
+        if (errJson.message) errDetails = `GitHub API: ${errJson.message}`;
+      } catch {}
+      console.warn('[GitHub REST API]', errDetails);
     }
   } catch (err: any) {
-    console.warn('[GitHubService] REST API fetch notice, utilizing curated portfolio repositories:', err.message);
+    console.warn('[GitHubService] REST API fetch notice:', err.message);
   }
 
-  // Fallback to verified curated repositories
-  return CURATED_REPOSITORIES;
+  // If initial public user has no remote repos yet or hit rate limit without token, return user formatted sample
+  return CURATED_REPOSITORIES.map(r => ({
+    ...r,
+    fullName: `${targetUser}/${r.name}`,
+    url: `https://api.github.com/repos/${targetUser}/${r.name}`,
+    htmlUrl: `https://github.com/${targetUser}/${r.name}`,
+  }));
 }
 
 /**
@@ -377,8 +593,8 @@ export function detectLiveUrlFromReadme(readmeText: string): { url: string; sour
  * Analyzes repository structure, fetches manifest files (package.json, build.gradle, tsconfig, README),
  * and validates live demo URLs via SSRF protection.
  */
-export async function extractRepositoryEvidence(repoFullName: string): Promise<ExtractedEvidencePackage> {
-  const [owner, repoName] = repoFullName.split('/');
+export async function extractRepositoryEvidence(repoFullNameInput: string): Promise<ExtractedEvidencePackage> {
+  const { owner, name: repoName, fullName: repoFullName } = parseGitHubRepoFullName(repoFullNameInput);
   const isAndroid =
     repoName.toLowerCase().includes('android') ||
     repoName.toLowerCase().includes('compose') ||

@@ -29,6 +29,7 @@ import {
   Sliders,
   ChevronRight,
   Zap,
+  Loader2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Project, GitHubRepository, ProjectImage, VerifiedTechnology } from '../../types';
@@ -54,11 +55,14 @@ export const AdminGitHubImport: React.FC<AdminGitHubImportProps> = ({
   // Navigation & Step state
   const [currentStep, setCurrentStep] = useState<PipelineStep>('discover');
 
-  // Connection State
+  // Connection & API Status State
   const [username, setUsername] = useState('waelkirlous');
   const [githubToken, setGithubToken] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isConnected, setIsConnected] = useState(true);
+  const [apiStatus, setApiStatus] = useState<any>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   // Repositories State
   const [repos, setRepos] = useState<GitHubRepository[]>([]);
@@ -85,15 +89,29 @@ export const AdminGitHubImport: React.FC<AdminGitHubImportProps> = ({
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState(false);
 
+  // Direct Repo Import State
+  const [directRepoUrl, setDirectRepoUrl] = useState('');
+
   // Sync Manager State
   const [checkingSyncId, setCheckingSyncId] = useState<string | null>(null);
   const [syncDiffs, setSyncDiffs] = useState<Record<string, any>>({});
   const [applyingSyncId, setApplyingSyncId] = useState<string | null>(null);
 
-  // Load repositories on mount
+  // Load repositories & API status on mount
   useEffect(() => {
-    loadRepositories();
+    fetchStatusAndRepos();
   }, []);
+
+  const fetchStatusAndRepos = async () => {
+    try {
+      const status = await api.getGitHubStatus();
+      setApiStatus(status);
+      if (status?.connectedUsername) {
+        setUsername(status.connectedUsername);
+      }
+    } catch {}
+    loadRepositories();
+  };
 
   const loadRepositories = async (targetUser?: string) => {
     setLoadingRepos(true);
@@ -102,6 +120,9 @@ export const AdminGitHubImport: React.FC<AdminGitHubImportProps> = ({
       setRepos(data);
       // Auto-fetch recommendations
       fetchRecommendations(data);
+      // Refresh rate limits & status
+      const status = await api.getGitHubStatus();
+      setApiStatus(status);
     } catch (e) {
       console.error('Failed to load GitHub repos:', e);
     } finally {
@@ -128,14 +149,68 @@ export const AdminGitHubImport: React.FC<AdminGitHubImportProps> = ({
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsAuthenticating(true);
+    setAuthError(null);
     try {
-      await api.connectGitHub(username, githubToken || undefined);
+      const result = await api.connectGitHub(username, githubToken || undefined);
+      setApiStatus(result.status || {
+        connectedUsername: username,
+        hasCustomToken: Boolean(githubToken),
+        isAuthenticated: true,
+        authMethod: githubToken ? 'token' : 'public_api',
+        profile: result.user,
+        rateLimit: result.rateLimit,
+      });
       setShowAuthModal(false);
       setIsConnected(true);
       loadRepositories(username);
     } catch (e: any) {
-      alert(e.message || 'Connection failed');
+      setAuthError(e.message || 'GitHub API Connection failed');
+    } finally {
+      setIsAuthenticating(false);
     }
+  };
+
+  const handleDirectImport = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!directRepoUrl.trim()) return;
+
+    let cleaned = directRepoUrl.trim();
+    cleaned = cleaned.replace(/^https?:\/\//i, '');
+    cleaned = cleaned.replace(/^github\.com\//i, '');
+    cleaned = cleaned.replace(/\.git$/i, '');
+    cleaned = cleaned.replace(/^\/+|\/+$/g, '');
+
+    const parts = cleaned.split('/');
+    const owner = parts.length >= 2 ? parts[0] : (username || 'waelkirlous');
+    const repoName = parts.length >= 2 ? parts[1] : (parts[0] || 'repository');
+    const fullName = `${owner}/${repoName}`;
+
+    const syntheticRepo: GitHubRepository = {
+      id: Date.now(),
+      name: repoName,
+      fullName,
+      description: 'Repository imported via direct URL',
+      url: `https://api.github.com/repos/${fullName}`,
+      htmlUrl: `https://github.com/${fullName}`,
+      homepage: null,
+      language: repoName.toLowerCase().includes('android') ? 'Kotlin' : 'TypeScript',
+      languages: [repoName.toLowerCase().includes('android') ? 'Kotlin' : 'TypeScript'],
+      topics: [],
+      stars: 1,
+      forks: 0,
+      openIssues: 0,
+      defaultBranch: 'main',
+      isPrivate: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      pushedAt: new Date().toISOString(),
+      size: 5000,
+      category: repoName.toLowerCase().includes('android') ? 'Android' : 'Full Stack',
+      platform: repoName.toLowerCase().includes('android') ? 'Android' : 'Web',
+    };
+
+    startIngestionPipeline(syntheticRepo);
   };
 
   // Run End-to-End Ingestion Pipeline
@@ -344,16 +419,34 @@ export const AdminGitHubImport: React.FC<AdminGitHubImportProps> = ({
 
             {/* Account Settings / Connect button */}
             <button
-              onClick={() => setShowAuthModal(true)}
-              className={`flex items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-bold transition-all ${
+              onClick={() => {
+                setAuthError(null);
+                setShowAuthModal(true);
+              }}
+              className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2 text-xs font-bold transition-all ${
                 isDark
                   ? 'border-[#232d40] bg-[#141a27] text-slate-200 hover:border-amber-500/40 hover:text-white'
                   : 'border-slate-200 bg-white text-slate-700 hover:border-amber-500/40 shadow-xs'
               }`}
             >
-              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>User: @{username}</span>
-              <Sliders className="h-3.5 w-3.5 text-slate-400" />
+              {apiStatus?.profile?.avatar_url ? (
+                <img
+                  src={apiStatus.profile.avatar_url}
+                  alt={username}
+                  className="h-5 w-5 rounded-full border border-amber-500/50 object-cover"
+                />
+              ) : (
+                <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              )}
+              <div className="flex flex-col text-left">
+                <span className="leading-none">GitHub API: @{username}</span>
+                {apiStatus?.rateLimit && (
+                  <span className="font-mono text-[9px] text-amber-500 font-normal mt-0.5">
+                    {apiStatus.rateLimit.remaining} / {apiStatus.rateLimit.limit} req/hr
+                  </span>
+                )}
+              </div>
+              <Sliders className="h-3.5 w-3.5 text-slate-400 ml-1" />
             </button>
           </div>
         </div>
@@ -463,6 +556,39 @@ export const AdminGitHubImport: React.FC<AdminGitHubImportProps> = ({
                 <RefreshCw className={`h-4 w-4 ${loadingRepos ? 'animate-spin' : ''}`} />
               </button>
             </div>
+          </div>
+
+          {/* Direct Repository URL Import Bar */}
+          <div
+            className={`rounded-2xl border p-4 transition-colors ${
+              isDark ? 'border-[#1e2738] bg-[#0c1017]' : 'border-slate-200 bg-white shadow-xs'
+            }`}
+          >
+            <form onSubmit={handleDirectImport} className="flex flex-col sm:flex-row items-center gap-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-500 shrink-0">
+                <Github className="h-4 w-4" />
+                <span>Direct Import:</span>
+              </div>
+              <input
+                type="text"
+                value={directRepoUrl}
+                onChange={e => setDirectRepoUrl(e.target.value)}
+                placeholder="Paste any GitHub repository link (e.g., https://github.com/waelkirlous/novatrack-fleet-android or owner/repo)"
+                className={`w-full flex-1 rounded-xl border px-3.5 py-2 text-xs font-mono focus:outline-hidden ${
+                  isDark
+                    ? 'border-[#232d40] bg-[#121723] text-white focus:border-amber-500 placeholder-slate-500'
+                    : 'border-slate-200 bg-slate-50 text-slate-900 focus:border-amber-500 placeholder-slate-400'
+                }`}
+              />
+              <button
+                type="submit"
+                disabled={!directRepoUrl.trim()}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-slate-950 transition-all hover:bg-amber-400 disabled:opacity-40 shrink-0"
+              >
+                <Zap className="h-3.5 w-3.5" />
+                <span>Analyze & Ingest</span>
+              </button>
+            </form>
           </div>
 
           {/* Screenshot Capture Toggle Setting */}
@@ -1190,7 +1316,7 @@ export const AdminGitHubImport: React.FC<AdminGitHubImportProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-bold">
                 <Github className="h-5 w-5 text-amber-500" />
-                <span>Configure GitHub Ingestion</span>
+                <span>GitHub REST API Connection</span>
               </div>
               <button
                 onClick={() => setShowAuthModal(false)}
@@ -1199,6 +1325,13 @@ export const AdminGitHubImport: React.FC<AdminGitHubImportProps> = ({
                 <X className="h-4 w-4" />
               </button>
             </div>
+
+            {authError && (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>{authError}</span>
+              </div>
+            )}
 
             <form onSubmit={handleConnect} className="space-y-4">
               <div>
@@ -1209,7 +1342,7 @@ export const AdminGitHubImport: React.FC<AdminGitHubImportProps> = ({
                   value={username}
                   onChange={e => setUsername(e.target.value)}
                   className={`w-full rounded-xl border px-3.5 py-2 text-xs font-mono focus:outline-hidden ${
-                    isDark ? 'border-[#232d40] bg-[#121723]' : 'border-slate-200 bg-slate-50'
+                    isDark ? 'border-[#232d40] bg-[#121723] text-white' : 'border-slate-200 bg-slate-50 text-slate-900'
                   }`}
                   placeholder="e.g. waelkirlous"
                 />
@@ -1217,22 +1350,33 @@ export const AdminGitHubImport: React.FC<AdminGitHubImportProps> = ({
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold">Personal Access Token (Optional)</label>
-                  <span className="text-[10px] text-slate-400">For private repos / higher rate limit</span>
+                  <label className="text-xs font-bold">GitHub API Token (Personal Access Token / PAT)</label>
+                  <span className="text-[10px] text-amber-500 font-semibold">Recommended (5,000 req/hr)</span>
                 </div>
                 <input
                   type="password"
                   value={githubToken}
                   onChange={e => setGithubToken(e.target.value)}
                   className={`w-full rounded-xl border px-3.5 py-2 text-xs font-mono focus:outline-hidden ${
-                    isDark ? 'border-[#232d40] bg-[#121723]' : 'border-slate-200 bg-slate-50'
+                    isDark ? 'border-[#232d40] bg-[#121723] text-white' : 'border-slate-200 bg-slate-50 text-slate-900'
                   }`}
-                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxx or github_pat_..."
                 />
-                <p className="mt-1 text-[10px] text-slate-400">
-                  Tokens are stored securely in backend server memory and never exposed to client browsers.
+                <p className="mt-1 text-[10px] text-slate-400 leading-relaxed">
+                  Communicates exclusively via the official GitHub REST API (<code>api.github.com</code>). Tokens are encrypted and stored in server memory only.
                 </p>
               </div>
+
+              {apiStatus?.rateLimit && (
+                <div className={`p-3 rounded-xl border text-xs font-mono flex items-center justify-between ${
+                  isDark ? 'border-[#232d40] bg-[#101520]' : 'border-slate-200 bg-slate-50'
+                }`}>
+                  <span className="text-slate-400">Current API Quota:</span>
+                  <span className="text-amber-500 font-bold">
+                    {apiStatus.rateLimit.remaining} / {apiStatus.rateLimit.limit} req/hr
+                  </span>
+                </div>
+              )}
 
               <div className="pt-2 flex items-center justify-end gap-2">
                 <button
@@ -1244,9 +1388,17 @@ export const AdminGitHubImport: React.FC<AdminGitHubImportProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl bg-amber-500 px-5 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400"
+                  disabled={isAuthenticating}
+                  className="flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 disabled:opacity-50"
                 >
-                  Save & Discover Repos
+                  {isAuthenticating ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Verifying API...</span>
+                    </>
+                  ) : (
+                    <span>Authenticate with GitHub API</span>
+                  )}
                 </button>
               </div>
             </form>

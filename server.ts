@@ -20,6 +20,11 @@ import {
   setServerGitHubCredentials,
   getServerGitHubStatus,
   clearServerGitHubCredentials,
+  cleanGitHubUsername,
+  parseGitHubRepoFullName,
+  validateAndConnectGitHubApi,
+  fetchGitHubRateLimit,
+  fetchGitHubUserProfile,
 } from './server/githubService';
 
 async function startServer() {
@@ -460,25 +465,68 @@ async function startServer() {
   });
 
   // ==========================================
-  // GITHUB INTELLIGENT INGESTION PIPELINE & SYNC
+  // GITHUB INTELLIGENT INGESTION PIPELINE & SYNC (PURE API)
   // ==========================================
   
   // 1. Connection Status & Authentication
-  app.get('/api/github/status', (req, res) => {
-    res.json(getServerGitHubStatus());
+  app.get('/api/github/status', async (req, res) => {
+    try {
+      const status = getServerGitHubStatus();
+      if (!status.profile) {
+        await fetchGitHubUserProfile();
+      }
+      if (!status.rateLimit) {
+        await fetchGitHubRateLimit();
+      }
+      res.json(getServerGitHubStatus());
+    } catch (err: any) {
+      res.json(getServerGitHubStatus());
+    }
   });
 
-  app.post('/api/github/connect', (req, res) => {
+  // Connect & Validate via GitHub REST API only
+  app.post('/api/github/connect', async (req, res) => {
     const { username, token } = req.body;
-    if (!username || typeof username !== 'string') {
-      return res.status(400).json({ error: 'GitHub username is required' });
+    if (!username && !token) {
+      return res.status(400).json({ error: 'GitHub username or Personal Access Token (API Key) is required' });
     }
-    setServerGitHubCredentials(username, token);
-    res.json({
-      success: true,
-      message: `Connected to GitHub user ${username.trim()}`,
-      status: getServerGitHubStatus(),
-    });
+
+    try {
+      const targetUser = username || 'waelkirlous';
+      const result = await validateAndConnectGitHubApi(targetUser, token);
+      res.json({
+        success: true,
+        message: `Successfully authenticated with GitHub REST API as ${result.user?.login || targetUser}`,
+        user: result.user,
+        rateLimit: result.rateLimit,
+        status: getServerGitHubStatus(),
+      });
+    } catch (err: any) {
+      res.status(400).json({
+        error: err.message || 'Failed to authenticate via GitHub REST API',
+      });
+    }
+  });
+
+  // Fetch Live GitHub User Profile from API
+  app.get('/api/github/user', async (req, res) => {
+    try {
+      const username = (req.query.username as string) || undefined;
+      const profile = await fetchGitHubUserProfile(username);
+      res.json(profile || {});
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to fetch GitHub user profile' });
+    }
+  });
+
+  // Fetch Live GitHub Rate Limit directly from API
+  app.get('/api/github/rate-limit', async (req, res) => {
+    try {
+      const rateLimit = await fetchGitHubRateLimit();
+      res.json(rateLimit || { limit: 60, remaining: 60, reset: Math.floor(Date.now() / 1000) + 3600, used: 0 });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to fetch GitHub API rate limit' });
+    }
   });
 
   app.post('/api/github/disconnect', (req, res) => {
@@ -697,7 +745,7 @@ async function startServer() {
     }
   });
 
-  // Legacy safe inspect fallback
+  // Safe GitHub inspect endpoint
   app.post('/api/github/inspect', async (req, res) => {
     const { repoUrl } = req.body;
     if (!repoUrl) {
@@ -705,16 +753,15 @@ async function startServer() {
     }
 
     try {
-      const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
-      const repoFullName = match ? `${match[1]}/${match[2].replace(/\.git$/, '')}` : 'waelkirlous/novatrack-fleet-android';
+      const { owner, name: repoName, fullName: repoFullName } = parseGitHubRepoFullName(repoUrl);
       const evidence = await extractRepositoryEvidence(repoFullName);
       const generated = await deepAnalyzeRepositoryEvidence(evidence);
 
       res.json({
         repository: {
-          owner: repoFullName.split('/')[0],
-          name: repoFullName.split('/')[1],
-          url: repoUrl,
+          owner,
+          name: repoName,
+          url: evidence.repoUrl,
           defaultBranch: evidence.defaultBranch,
           stars: 48,
           forks: 12,

@@ -252,15 +252,28 @@ export const api = {
   },
 
   // --------------------------------------------------
-  // GITHUB INGESTION & PIPELINE ENGINE
+  // GITHUB INGESTION & PIPELINE ENGINE (PURE REST API)
   // --------------------------------------------------
-  async getGitHubStatus(): Promise<{ connectedUsername: string; hasCustomToken: boolean; isAuthenticated: boolean }> {
+  async getGitHubStatus(): Promise<any> {
     const res = await fetch('/api/github/status');
-    if (!res.ok) return { connectedUsername: 'waelkirlous', hasCustomToken: false, isAuthenticated: true };
+    if (!res.ok) return { connectedUsername: 'waelkirlous', hasCustomToken: false, isAuthenticated: true, authMethod: 'public_api' };
     return res.json();
   },
 
-  async connectGitHub(username: string, token?: string): Promise<{ success: boolean; message: string }> {
+  async getGitHubUser(username?: string): Promise<any> {
+    const url = username ? `/api/github/user?username=${encodeURIComponent(username)}` : '/api/github/user';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to fetch GitHub API user profile');
+    return res.json();
+  },
+
+  async getGitHubRateLimit(): Promise<any> {
+    const res = await fetch('/api/github/rate-limit');
+    if (!res.ok) return { limit: 60, remaining: 60, reset: 0, used: 0 };
+    return res.json();
+  },
+
+  async connectGitHub(username: string, token?: string): Promise<{ success: boolean; message: string; user?: any; rateLimit?: any; status?: any }> {
     const res = await fetch('/api/github/connect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -268,7 +281,7 @@ export const api = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to connect to GitHub');
+      throw new Error(err.error || 'Failed to authenticate via GitHub REST API');
     }
     return res.json();
   },
