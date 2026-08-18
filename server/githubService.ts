@@ -315,6 +315,18 @@ export function clearServerGitHubCredentials() {
 }
 
 /**
+ * Automatically initializes and authenticates the GitHub API connection on server start
+ */
+export async function initGitHubApiConnection(): Promise<void> {
+  try {
+    await validateAndConnectGitHubApi(connectedUsername, serverGitHubToken || undefined);
+    console.log(`[GitHub API] Auto-authenticated with REST API as @${connectedUsername}`);
+  } catch (err: any) {
+    console.warn('[GitHub API] Auto-connect notice:', err.message);
+  }
+}
+
+/**
  * Fetches live rate limits directly from GitHub REST API: GET https://api.github.com/rate_limit
  */
 export async function fetchGitHubRateLimit(): Promise<any> {

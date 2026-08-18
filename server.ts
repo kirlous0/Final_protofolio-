@@ -25,11 +25,15 @@ import {
   validateAndConnectGitHubApi,
   fetchGitHubRateLimit,
   fetchGitHubUserProfile,
+  initGitHubApiConnection,
 } from './server/githubService';
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Auto-connect to GitHub REST API on startup
+  initGitHubApiConnection().catch(() => {});
 
   // Global middleware
   app.use(express.json({ limit: '10mb' }));
