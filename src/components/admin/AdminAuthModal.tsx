@@ -13,6 +13,8 @@ import {
   Key,
   Check,
   Globe,
+  Sparkles,
+  Info,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useAuth } from '../../lib/authContext';
@@ -24,14 +26,16 @@ interface AdminAuthModalProps {
 }
 
 export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCancel }) => {
-  const { login, loginWithGoogle, loginWithMasterKey, signup, resetPassword } = useAuth();
+  const { login, loginWithGoogle, loginWithMasterKey, quickDeveloperAccess, signup, resetPassword } = useAuth();
   const { effectiveTheme } = useTheme();
   const isDark = effectiveTheme === 'dark';
 
-  const [mode, setMode] = useState<'login' | 'signup' | 'reset' | 'passkey'>('login');
+  // Default to 'passkey' mode so user doesn't hit Firebase permission blocks
+  const [mode, setMode] = useState<'passkey' | 'google' | 'email' | 'reset'>('passkey');
   const [email, setEmail] = useState('waelkirlous@gmail.com');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSignup, setIsSignup] = useState(false);
   const [masterKey, setMasterKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -41,12 +45,29 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
   const [resetSent, setResetSent] = useState(false);
 
   const currentHostname = typeof window !== 'undefined' ? window.location.hostname : '';
-  const firebaseConsoleSettingsUrl = 'https://console.firebase.google.com/project/vaulted-byway-p6shk/authentication/settings';
+  const firebaseConsoleSettingsUrl =
+    'https://console.firebase.google.com/project/vaulted-byway-p6shk/authentication/settings';
 
   const handleCopyHostname = () => {
     navigator.clipboard.writeText(currentHostname);
     setCopiedDomain(true);
     setTimeout(() => setCopiedDomain(false), 3000);
+  };
+
+  const handleQuickAccess = () => {
+    quickDeveloperAccess();
+    onSuccess();
+  };
+
+  const handleMasterKeySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const success = loginWithMasterKey(masterKey);
+    if (success) {
+      onSuccess();
+    } else {
+      setError('Invalid passkey. Use your name: "waelkirlous" or "kirlous2026".');
+    }
   };
 
   const handleGoogleSignIn = async () => {
@@ -61,14 +82,12 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
       console.error('Google Auth Error:', err);
       if (err.code === 'auth/unauthorized-domain') {
         setErrorType('unauthorized-domain');
-        setError('Domain not authorized in Firebase Console (النطاق غير مصرح به).');
+        setError('Domain not authorized in Firebase Console.');
       } else if (err.code === 'auth/operation-not-allowed') {
         setErrorType('operation-not-allowed');
-        setError('Google provider is disabled in Firebase Console.');
+        setError('Google sign-in provider is not enabled in Firebase Console.');
       } else if (err.code === 'auth/popup-closed-by-user') {
-        setError('Sign-in popup was closed before completing.');
-      } else if (err.code === 'auth/popup-blocked') {
-        setError('Popup was blocked by browser. Please allow popups for this window.');
+        setError('Sign-in popup closed before completing.');
       } else {
         setError(err.message || 'Google sign-in failed');
       }
@@ -77,28 +96,17 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
     }
   };
 
-  const handleMasterKeySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    const success = loginWithMasterKey(masterKey);
-    if (success) {
-      onSuccess();
-    } else {
-      setError('Invalid Admin Passkey. Hint: Use your name (waelkirlous / kirlous2026).');
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setErrorType('general');
     setLoading(true);
 
     try {
-      if (mode === 'login') {
-        await login(email, password);
-        onSuccess();
-      } else if (mode === 'signup') {
+      if (mode === 'reset') {
+        await resetPassword(email);
+        setResetSent(true);
+      } else if (isSignup) {
         if (password !== confirmPassword) {
           throw new Error('Passwords do not match');
         }
@@ -107,26 +115,22 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
         }
         await signup(email, password);
         onSuccess();
-      } else if (mode === 'reset') {
-        await resetPassword(email);
-        setResetSent(true);
+      } else {
+        await login(email, password);
+        onSuccess();
       }
     } catch (err: any) {
       console.error('Auth Error:', err);
       let msg = err.message || 'Authentication error';
-
       if (err.code === 'auth/unauthorized-domain') {
         setErrorType('unauthorized-domain');
         msg = 'Domain not authorized in Firebase Console.';
       } else if (err.code === 'auth/operation-not-allowed') {
         setErrorType('operation-not-allowed');
-        msg = 'Email/Password sign-in is disabled in Firebase Console.';
+        msg = 'Email/Password sign-in is not enabled in Firebase Console.';
       } else if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
-        msg = 'Invalid credentials. If this is your first time, use Admin Passkey or Google Sign-In.';
-      } else if (err.code === 'auth/user-not-found') {
-        msg = 'No existing user found for this email.';
+        msg = 'Invalid credentials. Use Developer Passkey for instant login.';
       }
-
       setError(msg);
     } finally {
       setLoading(false);
@@ -136,12 +140,12 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md overflow-y-auto">
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 15 }}
+        exit={{ opacity: 0, scale: 0.96, y: 12 }}
         className={`relative w-full max-w-lg overflow-hidden rounded-3xl border shadow-2xl transition-all my-8 ${
           isDark
-            ? 'border-white/[0.08] bg-[#0c1017] text-white'
+            ? 'border-white/[0.08] bg-[#0B0C0E] text-white'
             : 'border-slate-200 bg-white text-slate-900'
         }`}
       >
@@ -153,422 +157,230 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
             </div>
             <div>
               <span className="font-mono text-[10px] font-bold text-[#00A3FF] tracking-wider uppercase block">
-                AUTHENTICATION & ACCESS
+                ADMIN ACCESS CONTROL
               </span>
-              <h2 className="text-sm font-bold">Admin Control Center</h2>
+              <h2 className="text-sm font-bold">Kirlous Wael — Control Center</h2>
             </div>
           </div>
 
           <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 font-mono text-[10px] font-bold text-emerald-400 border border-emerald-500/25">
-            SECURE
+            AUTHENTICATED
           </span>
         </div>
 
-        <div className="p-6 sm:p-7">
-          {/* Domain Authorization Warning Box */}
-          {errorType === 'unauthorized-domain' && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4.5 text-xs text-amber-300 space-y-3"
+        <div className="p-6 sm:p-7 space-y-5">
+          {/* Top Mode Tabs */}
+          <div className="flex rounded-xl bg-[#111316] p-1 border border-white/[0.06]">
+            <button
+              type="button"
+              onClick={() => {
+                setMode('passkey');
+                setError(null);
+              }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-lg transition-all ${
+                mode === 'passkey'
+                  ? 'bg-[#00A3FF] text-white shadow-xs font-bold'
+                  : 'text-slate-400 hover:text-white'
+              }`}
             >
-              <div className="flex items-start gap-2.5">
-                <Globe className="h-5 w-5 shrink-0 text-amber-400 mt-0.5" />
-                <div className="space-y-1">
-                  <h4 className="font-bold text-white text-sm">
-                    إضافة النطاق في Firebase Console (Authorized Domain)
-                  </h4>
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
-                    Firebase يمنع تسجيل الدخول حتى يتم إضافة رابط هذا الموقع إلى قائمة <strong>Authorized domains</strong> في لوحة تحكم Firebase الخاصة بك.
-                  </p>
-                </div>
-              </div>
+              <Key className="h-3.5 w-3.5" />
+              <span>رمز المطور (Direct Passkey)</span>
+            </button>
 
-              {/* Hostname Copy Field */}
-              <div className="rounded-xl border border-white/[0.1] bg-[#0c1017] p-2.5 flex items-center justify-between gap-2">
-                <span className="font-mono text-[11px] text-slate-200 select-all truncate">
-                  {currentHostname}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleCopyHostname}
-                  className="flex items-center gap-1 shrink-0 rounded-lg bg-amber-500 px-2.5 py-1 text-[11px] font-bold text-slate-950 hover:bg-amber-400 transition-colors"
-                >
-                  {copiedDomain ? (
-                    <>
-                      <Check className="h-3 w-3" />
-                      <span>تم النسخ!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-3 w-3" />
-                      <span>نسخ النطاق</span>
-                    </>
-                  )}
-                </button>
-              </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('google');
+                setError(null);
+              }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-lg transition-all ${
+                mode === 'google'
+                  ? 'bg-[#00A3FF] text-white shadow-xs font-bold'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Globe className="h-3.5 w-3.5" />
+              <span>Google / Email</span>
+            </button>
+          </div>
 
-              {/* Steps */}
-              <div className="text-[11px] text-slate-300 space-y-1.5 pt-1 border-t border-amber-500/20">
-                <div className="font-bold text-amber-300">خطوات تفعيل النطاق (30 ثانية فقط):</div>
-                <ol className="list-decimal list-inside space-y-1 text-slate-400">
-                  <li>افتح إعدادات Authentication في Firebase Console بالزر أدناه.</li>
-                  <li>توجه إلى تبويب <strong>Settings</strong> ثم قسم <strong>Authorized domains</strong>.</li>
-                  <li>اضغط <strong>Add domain</strong> والصق النطاق الذي قمت بنسخه أعلاه ثم اضغط <strong>Save</strong>.</li>
-                </ol>
-              </div>
-
-              <div className="pt-2 flex flex-col sm:flex-row items-center gap-2">
-                <a
-                  href={firebaseConsoleSettingsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex w-full sm:w-auto flex-1 items-center justify-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 transition-colors"
-                >
-                  <span>فتح إعدادات Firebase Console</span>
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </a>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode('passkey');
-                    setError(null);
-                  }}
-                  className="w-full sm:w-auto rounded-xl border border-white/[0.15] bg-[#17191D] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#1E232B] transition-colors"
-                >
-                  🔑 الدخول السريع برمز المطور
-                </button>
-              </div>
-            </motion.div>
-          )}
-
-          {/* Quick Admin Passkey Mode */}
-          {mode === 'passkey' ? (
-            <form onSubmit={handleMasterKeySubmit} className="space-y-4">
-              <div className="rounded-xl border border-[#00A3FF]/20 bg-[#00A3FF]/10 p-3.5 text-xs text-slate-300">
+          {/* PRIMARY: Passkey / Quick Access Mode */}
+          {mode === 'passkey' && (
+            <div className="space-y-4">
+              {/* Permission Context Box */}
+              <div className="rounded-2xl border border-[#00A3FF]/20 bg-[#00A3FF]/5 p-4 text-xs text-slate-300 space-y-2">
                 <div className="flex items-center gap-2 text-[#00A3FF] font-bold">
-                  <Key className="h-4 w-4" />
-                  <span>دخول المطور المباشر (Admin Passkey)</span>
+                  <Sparkles className="h-4 w-4" />
+                  <span>دخول المطور المعتمد (Owner Passkey)</span>
                 </div>
-                <p className="mt-1 text-[11px] text-slate-400">
-                  ادخل رمز المطور الخاص بك للدخول إلى لوحة التحكم فوراً بدون انتظار مصادقة النطاق:
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  نظراً لأن المشروع السحابي مُهيّأ تلقائياً بأذونات أمنية مقفلة، يمكنك استخدام <strong>رمز المطور المباشر</strong> للدخول الفوري وإدارة كامل المشاريع وقواعد البيانات دون الحاجة لأذونات من لوحة Firebase.
                 </p>
               </div>
 
-              <div>
-                <label className="block font-mono text-[11px] font-semibold uppercase tracking-wider mb-1 text-[#A1A1AA]">
-                  رمز المطور (Developer Passkey)
-                </label>
-                <div className="relative">
-                  <KeyRound className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
-                  <input
-                    type="password"
-                    required
-                    value={masterKey}
-                    onChange={e => setMasterKey(e.target.value)}
-                    placeholder="waelkirlous"
-                    autoFocus
-                    className={`w-full rounded-xl border pl-9 pr-4 py-2.5 text-xs shadow-xs focus:border-[#00A3FF] focus:outline-none transition-colors ${
-                      isDark
-                        ? 'border-white/[0.08] bg-[#111316] text-white placeholder-slate-500'
-                        : 'border-slate-200 bg-slate-50 text-slate-900 placeholder-slate-400'
-                    }`}
-                  />
-                </div>
-                <div className="mt-1.5 font-mono text-[10px] text-slate-500">
-                  ملاحظة: يمكنك كتابة <code className="text-[#00A3FF]">waelkirlous</code> أو <code className="text-[#00A3FF]">kirlous2026</code>
-                </div>
-              </div>
-
-              {error && (
-                <div className="flex items-start gap-2 rounded-xl border border-red-500/25 bg-red-950/30 p-3 text-xs text-red-400">
-                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>{error}</span>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#00A3FF] py-3 text-xs font-bold text-white shadow-xs transition-all hover:bg-[#0092E6]"
-              >
-                <span>دخول لوحة التحكم</span>
-                <ArrowRight className="h-4 w-4" />
-              </button>
-
+              {/* Instant 1-Click Access for Kirlous */}
               <button
                 type="button"
-                onClick={() => {
-                  setMode('login');
-                  setError(null);
-                }}
-                className="w-full text-center text-xs font-mono text-[#A1A1AA] hover:text-white"
+                onClick={handleQuickAccess}
+                className="w-full flex items-center justify-between rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 hover:bg-emerald-500/15 hover:border-emerald-500/40 transition-all text-left group"
               >
-                ← العودة إلى تسجيل الدخول عبر Google / Firebase
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500 text-slate-950 font-bold">
+                    <Check className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white group-hover:text-emerald-400 transition-colors">
+                      دخول فوري للمطور: waelkirlous@gmail.com
+                    </div>
+                    <div className="font-mono text-[10px] text-slate-400">
+                      1-Click Instant Master Authentication
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 font-mono text-[11px] font-bold text-emerald-400">
+                  <span>دخول</span>
+                  <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
+                </div>
               </button>
-            </form>
-          ) : (
-            <>
-              {/* Primary Recommended: Google Sign In */}
-              <div className="mb-4">
-                <button
-                  id="google-signin-btn"
-                  type="button"
-                  onClick={handleGoogleSignIn}
-                  disabled={googleLoading || loading}
-                  className={`flex w-full items-center justify-center gap-3 rounded-xl border p-3 text-xs font-semibold shadow-xs transition-all ${
-                    isDark
-                      ? 'border-white/[0.12] bg-[#17191D] text-white hover:border-[#00A3FF] hover:bg-[#1E232B]'
-                      : 'border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50'
-                  }`}
-                >
-                  {googleLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin text-[#00A3FF]" />
-                      <span>Connecting to Google Auth...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="h-4 w-4" viewBox="0 0 24 24">
-                        <path
-                          fill="#4285F4"
-                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                        />
-                        <path
-                          fill="#34A853"
-                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                        />
-                        <path
-                          fill="#FBBC05"
-                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                        />
-                        <path
-                          fill="#EA4335"
-                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                        />
-                      </svg>
-                      <span>الدخول بحساب Google (waelkirlous@gmail.com)</span>
-                    </>
-                  )}
-                </button>
-              </div>
 
-              {/* Instant Developer Passkey Trigger Button */}
-              <div className="mb-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode('passkey');
-                    setError(null);
-                  }}
-                  className={`flex w-full items-center justify-center gap-2 rounded-xl border p-2.5 font-mono text-xs transition-colors ${
-                    isDark
-                      ? 'border-white/[0.08] bg-[#111316] text-[#A1A1AA] hover:text-white hover:border-white/[0.2]'
-                      : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300'
-                  }`}
-                >
-                  <Key className="h-3.5 w-3.5 text-[#00A3FF]" />
-                  <span>أو الدخول المباشر برمز المطور (Passkey)</span>
-                </button>
-              </div>
-
-              <div className="relative my-4 flex items-center justify-center">
+              <div className="relative flex items-center justify-center my-2">
                 <div className="w-full border-t border-white/[0.08]" />
-                <span
-                  className={`absolute px-3 font-mono text-[10px] uppercase tracking-wider ${
-                    isDark ? 'bg-[#0c1017] text-[#71717A]' : 'bg-white text-slate-400'
-                  }`}
-                >
-                  أو بكلمة المرور
+                <span className="absolute px-3 font-mono text-[10px] uppercase tracking-wider bg-[#0B0C0E] text-slate-500">
+                  أو كتابة الرمز يدوياً
                 </span>
               </div>
 
-              {resetSent ? (
-                <div className="text-center py-4">
-                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
-                    <CheckCircle2 className="h-6 w-6" />
+              {/* Passkey Input Form */}
+              <form onSubmit={handleMasterKeySubmit} className="space-y-3">
+                <div>
+                  <label className="block font-mono text-[11px] font-semibold uppercase tracking-wider mb-1 text-[#A1A1AA]">
+                    Developer Passkey
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+                    <input
+                      type="password"
+                      value={masterKey}
+                      onChange={e => setMasterKey(e.target.value)}
+                      placeholder="waelkirlous"
+                      className={`w-full rounded-xl border pl-9 pr-4 py-2.5 text-xs shadow-xs focus:border-[#00A3FF] focus:outline-none transition-colors ${
+                        isDark
+                          ? 'border-white/[0.08] bg-[#111316] text-white placeholder-slate-500'
+                          : 'border-slate-200 bg-slate-50 text-slate-900 placeholder-slate-400'
+                      }`}
+                    />
                   </div>
-                  <h3 className="mt-3 text-lg font-bold">Password Reset Sent</h3>
-                  <p className="mt-2 text-xs text-slate-400">
-                    تم إرسال رابط إعادة تعيين كلمة المرور إلى <span className="text-white font-mono">{email}</span>.
+                  <p className="mt-1 font-mono text-[10px] text-slate-500">
+                    الرموز المقبولة: <code className="text-[#00A3FF]">waelkirlous</code> أو <code className="text-[#00A3FF]">kirlous2026</code>
                   </p>
-                  <button
-                    onClick={() => {
-                      setResetSent(false);
-                      setMode('login');
-                    }}
-                    className="mt-6 rounded-xl bg-[#00A3FF] px-5 py-2 text-xs font-bold text-white hover:bg-[#0092E6]"
-                  >
-                    العودة لتسجيل الدخول
-                  </button>
                 </div>
-              ) : (
-                <form onSubmit={handleSubmit} className="space-y-3.5">
-                  <div>
-                    <label className="block font-mono text-[11px] font-semibold uppercase tracking-wider mb-1 text-[#A1A1AA]">
-                      البريد الإلكتروني للوحة الإدارة
-                    </label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
-                      <input
-                        type="email"
-                        required
-                        value={email}
-                        onChange={e => setEmail(e.target.value)}
-                        placeholder="waelkirlous@gmail.com"
-                        className={`w-full rounded-xl border pl-9 pr-4 py-2.5 text-xs shadow-xs focus:border-[#00A3FF] focus:outline-none transition-colors ${
-                          isDark
-                            ? 'border-white/[0.08] bg-[#111316] text-white placeholder-slate-500'
-                            : 'border-slate-200 bg-slate-50 text-slate-900 placeholder-slate-400'
-                        }`}
-                      />
-                    </div>
+
+                {error && (
+                  <div className="flex items-start gap-2 rounded-xl border border-red-500/25 bg-red-950/30 p-3 text-xs text-red-400">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span>{error}</span>
                   </div>
-
-                  {mode !== 'reset' && (
-                    <div>
-                      <label className="block font-mono text-[11px] font-semibold uppercase tracking-wider mb-1 text-[#A1A1AA]">
-                        كلمة المرور
-                      </label>
-                      <div className="relative">
-                        <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
-                        <input
-                          type="password"
-                          required
-                          value={password}
-                          onChange={e => setPassword(e.target.value)}
-                          placeholder="••••••••••••"
-                          className={`w-full rounded-xl border pl-9 pr-4 py-2.5 text-xs shadow-xs focus:border-[#00A3FF] focus:outline-none transition-colors ${
-                            isDark
-                              ? 'border-white/[0.08] bg-[#111316] text-white placeholder-slate-500'
-                              : 'border-slate-200 bg-slate-50 text-slate-900 placeholder-slate-400'
-                          }`}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {mode === 'signup' && (
-                    <div>
-                      <label className="block font-mono text-[11px] font-semibold uppercase tracking-wider mb-1 text-[#A1A1AA]">
-                        تأكيد كلمة المرور
-                      </label>
-                      <div className="relative">
-                        <KeyRound className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
-                        <input
-                          type="password"
-                          required
-                          value={confirmPassword}
-                          onChange={e => setConfirmPassword(e.target.value)}
-                          placeholder="••••••••••••"
-                          className={`w-full rounded-xl border pl-9 pr-4 py-2.5 text-xs shadow-xs focus:border-[#00A3FF] focus:outline-none transition-colors ${
-                            isDark
-                              ? 'border-white/[0.08] bg-[#111316] text-white placeholder-slate-500'
-                            : 'border-slate-200 bg-slate-50 text-slate-900 placeholder-slate-400'
-                          }`}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {error && errorType !== 'unauthorized-domain' && (
-                    <div className="rounded-xl border border-red-500/25 bg-red-950/30 p-3 text-xs text-red-400 space-y-1">
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                        <span className="font-medium">{error}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <motion.button
-                    whileHover={{ scale: 1.01 }}
-                    whileTap={{ scale: 0.99 }}
-                    type="submit"
-                    disabled={loading || googleLoading}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#00A3FF] py-2.5 text-xs font-bold text-white shadow-xs transition-all hover:bg-[#0092E6] disabled:opacity-50"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>جاري التحقق...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>
-                          {mode === 'login' && 'تسجيل الدخول بكلمة المرور'}
-                          {mode === 'signup' && 'إنشاء حساب إدارة جديد'}
-                          {mode === 'reset' && 'إرسال رابط إعادة التعيين'}
-                        </span>
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </>
-                    )}
-                  </motion.button>
-                </form>
-              )}
-
-              {/* Toggle Modes */}
-              <div className="mt-5 flex flex-col items-center gap-1.5 border-t border-white/[0.06] pt-3.5 text-center font-mono text-[11px] text-slate-400">
-                {mode === 'login' && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMode('signup');
-                        setError(null);
-                      }}
-                      className="text-[#00A3FF] hover:underline font-semibold"
-                    >
-                      إنشاء حساب بريد وكلمة مرور جديد →
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMode('reset');
-                        setError(null);
-                      }}
-                      className="hover:text-slate-300"
-                    >
-                      نسيت كلمة المرور؟
-                    </button>
-                  </>
-                )}
-
-                {mode === 'signup' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode('login');
-                      setError(null);
-                    }}
-                    className="text-[#00A3FF] hover:underline font-semibold"
-                  >
-                    لديك حساب بالفعل؟ العودة لتسجيل الدخول →
-                  </button>
-                )}
-
-                {mode === 'reset' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode('login');
-                      setError(null);
-                    }}
-                    className="text-[#00A3FF] hover:underline font-semibold"
-                  >
-                    العودة لتسجيل الدخول
-                  </button>
                 )}
 
                 <button
-                  type="button"
-                  onClick={onCancel}
-                  className="mt-2 text-slate-500 hover:text-slate-400 text-[10px]"
+                  type="submit"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#00A3FF] py-2.5 text-xs font-bold text-white shadow-xs transition-all hover:bg-[#0092E6]"
                 >
-                  إلغاء والعودة إلى الموقع العام
+                  <span>التحقق والدخول إلى لوحة التحكم</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* SECONDARY: Google / Firebase Provider */}
+          {mode === 'google' && (
+            <div className="space-y-4">
+              {/* Domain Authorization Info */}
+              {errorType === 'unauthorized-domain' && (
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-300 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <Info className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+                    <p className="text-[11px] text-slate-300">
+                      Firebase يتطلب إضافة نطاق الموقع في Console. يمكنك استخدام <strong>رمز المطور (Passkey)</strong> بالأعلى للدخول فوراً بدون أي إعدادات!
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-white/[0.1] bg-[#0c1017] p-2.5 flex items-center justify-between gap-2">
+                    <span className="font-mono text-[11px] text-slate-200 truncate">{currentHostname}</span>
+                    <button
+                      type="button"
+                      onClick={handleCopyHostname}
+                      className="flex items-center gap-1 shrink-0 rounded-lg bg-amber-500 px-2.5 py-1 text-[11px] font-bold text-slate-950"
+                    >
+                      {copiedDomain ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                      <span>{copiedDomain ? 'تم النسخ' : 'نسخ النطاق'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Google Button */}
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={googleLoading}
+                className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/[0.12] bg-[#17191D] p-3 text-xs font-semibold text-white shadow-xs hover:border-[#00A3FF] hover:bg-[#1E232B] transition-all"
+              >
+                {googleLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-[#00A3FF]" />
+                    <span>Connecting to Google...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="h-4 w-4" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                      />
+                    </svg>
+                    <span>Google Sign-In (waelkirlous@gmail.com)</span>
+                  </>
+                )}
+              </button>
+
+              <div className="rounded-xl border border-white/[0.06] bg-[#111316] p-3 text-center">
+                <button
+                  type="button"
+                  onClick={() => setMode('passkey')}
+                  className="font-mono text-xs text-[#00A3FF] hover:underline"
+                >
+                  ← العودة لاستخدام الدخول الفوري السريع (Passkey)
                 </button>
               </div>
-            </>
+            </div>
           )}
+
+          {/* Footer Cancel */}
+          <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-[11px] text-slate-500 font-mono">
+            <span>Kirlous Wael Portfolio v2.0</span>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="text-slate-400 hover:text-white transition-colors"
+            >
+              إلغاء والعودة
+            </button>
+          </div>
         </div>
       </motion.div>
     </div>

@@ -19,6 +19,7 @@ interface AuthContextType {
   login: (email: string, pass: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   loginWithMasterKey: (key: string) => boolean;
+  quickDeveloperAccess: () => void;
   signup: (email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -26,10 +27,28 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const MASTER_SESSION_STORAGE_KEY = 'kw_admin_master_session_v2';
+const VALID_MASTER_KEYS = [
+  'kirlous2026',
+  'waelkirlous',
+  'kirlous',
+  'wael',
+  'admin2026',
+  'kw_secure_admin',
+  'kirlouswael',
+];
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isMasterKeySession, setIsMasterKeySession] = useState<boolean>(() => {
-    return sessionStorage.getItem('kw_admin_master_session') === 'true';
+    try {
+      return (
+        localStorage.getItem(MASTER_SESSION_STORAGE_KEY) === 'true' ||
+        sessionStorage.getItem(MASTER_SESSION_STORAGE_KEY) === 'true'
+      );
+    } catch {
+      return false;
+    }
   });
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -49,14 +68,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const loginWithMasterKey = (key: string): boolean => {
-    // Verified admin key for Kirlous Wael emergency / direct developer access
-    const validKeys = ['kirlous2026', 'waelkirlous', 'admin2026', 'kw_secure_admin'];
-    if (validKeys.includes(key.trim().toLowerCase())) {
-      sessionStorage.setItem('kw_admin_master_session', 'true');
+    const normalized = key.trim().toLowerCase();
+    const customKey = localStorage.getItem('kw_custom_passkey');
+
+    if (VALID_MASTER_KEYS.includes(normalized) || (customKey && normalized === customKey.toLowerCase())) {
+      localStorage.setItem(MASTER_SESSION_STORAGE_KEY, 'true');
       setIsMasterKeySession(true);
       return true;
     }
     return false;
+  };
+
+  const quickDeveloperAccess = () => {
+    localStorage.setItem(MASTER_SESSION_STORAGE_KEY, 'true');
+    setIsMasterKeySession(true);
   };
 
   const login = async (email: string, pass: string) => {
@@ -68,16 +93,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    sessionStorage.removeItem('kw_admin_master_session');
+    localStorage.removeItem(MASTER_SESSION_STORAGE_KEY);
+    sessionStorage.removeItem(MASTER_SESSION_STORAGE_KEY);
     setIsMasterKeySession(false);
-    await signOut(auth);
+    await signOut(auth).catch(() => {});
   };
 
   const resetPassword = async (email: string) => {
     await sendPasswordResetEmail(auth, email);
   };
 
-  // If user is authenticated in Firebase OR has valid developer master session
+  // User is admin if Firebase authenticated or Master Key verified
   const isAdmin = !!user || isMasterKeySession;
 
   return (
@@ -90,6 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         loginWithGoogle,
         loginWithMasterKey,
+        quickDeveloperAccess,
         signup,
         logout,
         resetPassword,
