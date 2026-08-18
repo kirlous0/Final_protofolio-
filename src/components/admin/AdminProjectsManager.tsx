@@ -15,6 +15,9 @@ import {
   Globe,
   Smartphone,
   ExternalLink,
+  AlertTriangle,
+  Loader2,
+  Check,
 } from 'lucide-react';
 import { Project } from '../../types';
 import { api } from '../../lib/api';
@@ -40,6 +43,13 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   const filteredProjects = projects.filter(p => {
     const matchesSearch =
@@ -57,9 +67,10 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
     setActionLoadingId(project.id);
     try {
       await api.toggleFeatureProject(project.id);
+      showToast(project.featured ? `Removed "${project.title}" from featured` : `Marked "${project.title}" as featured`);
       onRefresh();
     } catch (err: any) {
-      alert(err.message || 'Failed to toggle featured status');
+      showToast(err.message || 'Failed to update featured status');
     } finally {
       setActionLoadingId(null);
     }
@@ -70,22 +81,28 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
     const newStatus = project.status === 'published' ? 'draft' : 'published';
     try {
       await api.updateProject(project.id, { status: newStatus });
+      showToast(`Status changed to ${newStatus}`);
       onRefresh();
     } catch (err: any) {
-      alert(err.message || 'Failed to update project status');
+      showToast(err.message || 'Failed to update status');
     } finally {
       setActionLoadingId(null);
     }
   };
 
-  const handleDelete = async (project: Project) => {
-    if (!window.confirm(`Are you sure you want to delete project "${project.title}"?`)) return;
-    setActionLoadingId(project.id);
+  const confirmDelete = async () => {
+    if (!projectToDelete) return;
+    const id = projectToDelete.id;
+    const title = projectToDelete.title;
+    setActionLoadingId(id);
+    setProjectToDelete(null);
+
     try {
-      await api.deleteProject(project.id);
+      await api.deleteProject(id);
+      showToast(`Project "${title}" deleted successfully`);
       onRefresh();
     } catch (err: any) {
-      alert(err.message || 'Failed to delete project');
+      showToast(err.message || 'Failed to delete project');
     } finally {
       setActionLoadingId(null);
     }
@@ -101,9 +118,10 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
         status: 'draft',
         featured: false,
       });
+      showToast(`Duplicated "${project.title}" as draft`);
       onRefresh();
     } catch (err: any) {
-      alert(err.message || 'Failed to duplicate project');
+      showToast(err.message || 'Failed to duplicate project');
     } finally {
       setActionLoadingId(null);
     }
@@ -123,12 +141,59 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
       await api.reorderProjects(orderedIds);
       onRefresh();
     } catch (err: any) {
-      alert(err.message || 'Failed to reorder projects');
+      showToast(err.message || 'Failed to reorder projects');
     }
   };
 
   return (
     <div id="admin-projects-tab" className="space-y-6">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-[#0c1017] px-4 py-3 text-xs font-semibold text-emerald-400 shadow-2xl backdrop-blur-md">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal (Iframe-Safe) */}
+      {projectToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl border border-red-500/30 bg-[#0c1017] p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/10 border border-red-500/30">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-sm">Delete Project Case Study?</h3>
+                <p className="text-[11px] text-slate-400">This action cannot be undone.</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 bg-[#121622] p-3 rounded-xl border border-[#202738]">
+              Are you sure you want to permanently remove <strong className="text-white">"{projectToDelete.title}"</strong>?
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setProjectToDelete(null)}
+                className="rounded-lg border border-[#232d40] bg-[#121723] px-4 py-2 text-xs font-medium text-slate-300 hover:bg-[#182030]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="flex items-center gap-1.5 rounded-lg bg-red-500 px-4 py-2 text-xs font-bold text-white hover:bg-red-600 transition-colors shadow-xs"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Delete Permanently</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header & Controls */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -141,7 +206,7 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
         <button
           id="admin-create-project-btn"
           onClick={onCreateProject}
-          className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-amber-400"
+          className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-amber-400 shadow-xs"
         >
           <Plus className="h-4 w-4" />
           <span>Create New Project</span>
@@ -243,6 +308,7 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
                       <h3 className="font-semibold text-sm text-white truncate">{project.title}</h3>
                       <button
                         onClick={() => handleToggleFeatured(project)}
+                        disabled={actionLoadingId === project.id}
                         className={`p-0.5 transition-colors ${
                           project.featured ? 'text-amber-400' : 'text-slate-600 hover:text-slate-400'
                         }`}
@@ -276,12 +342,16 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
                 <div className="flex flex-wrap items-center gap-2 border-t border-[#182030] pt-3 lg:border-t-0 lg:pt-0">
                   <button
                     onClick={() => handleToggleStatus(project)}
+                    disabled={actionLoadingId === project.id}
                     className={`rounded-lg px-2.5 py-1 font-mono text-xs transition-colors ${
                       project.status === 'published'
                         ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
                         : 'bg-slate-500/10 text-slate-400 border border-slate-500/30'
                     }`}
                   >
+                    {actionLoadingId === project.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin inline mr-1" />
+                    ) : null}
                     {project.status === 'published' ? 'Published' : 'Draft'}
                   </button>
 
@@ -321,7 +391,7 @@ export const AdminProjectsManager: React.FC<AdminProjectsManagerProps> = ({
                   </button>
 
                   <button
-                    onClick={() => handleDelete(project)}
+                    onClick={() => setProjectToDelete(project)}
                     className="p-1.5 text-red-400 hover:text-red-300"
                     title="Delete Project"
                   >

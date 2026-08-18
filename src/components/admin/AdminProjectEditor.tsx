@@ -35,6 +35,7 @@ export const AdminProjectEditor: React.FC<AdminProjectEditorProps> = ({
   const [loading, setLoading] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   // Form State
   const [title, setTitle] = useState(project?.title || '');
@@ -124,9 +125,10 @@ export const AdminProjectEditor: React.FC<AdminProjectEditorProps> = ({
   // AI Generation from Title / Description
   const handleAiEnhance = async () => {
     if (!title) {
-      alert('Please enter at least a project title first.');
+      setError('Please enter a project title before running AI enhancement.');
       return;
     }
+    setError(null);
     setAiGenerating(true);
     try {
       const aiResult = await api.aiAnalyzeProject({
@@ -147,8 +149,10 @@ export const AdminProjectEditor: React.FC<AdminProjectEditorProps> = ({
       if (aiResult.technologies?.length) setTechnologies(aiResult.technologies.join(', '));
       if (aiResult.category) setCategory(aiResult.category);
       if (aiResult.platform) setPlatform(aiResult.platform);
+      setInfoMessage('Project metadata successfully generated with Gemini AI!');
+      setTimeout(() => setInfoMessage(null), 3000);
     } catch (err: any) {
-      alert(err.message || 'AI Enhancement failed');
+      setError(err.message || 'AI Enhancement failed');
     } finally {
       setAiGenerating(false);
     }
@@ -291,6 +295,13 @@ export const AdminProjectEditor: React.FC<AdminProjectEditorProps> = ({
             <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-950/30 p-3 text-xs text-red-300">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span>{error}</span>
+            </div>
+          )}
+
+          {infoMessage && (
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-950/30 p-3 text-xs text-emerald-300">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span>{infoMessage}</span>
             </div>
           )}
 
@@ -608,7 +619,7 @@ export const AdminProjectEditor: React.FC<AdminProjectEditorProps> = ({
             type="button"
             onClick={handleSubmit}
             disabled={loading}
-            className="flex items-center gap-2 rounded-lg bg-amber-500 px-6 py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-amber-400 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-amber-500 px-6 py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-amber-400 disabled:opacity-50 shadow-xs"
           >
             {loading ? (
               <>

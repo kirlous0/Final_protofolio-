@@ -1,15 +1,11 @@
 import React, { useState } from 'react';
 import {
   Shield,
-  Lock,
-  Mail,
   KeyRound,
   AlertCircle,
   Loader2,
-  CheckCircle2,
   ArrowRight,
   Copy,
-  ExternalLink,
   Key,
   Check,
   Globe,
@@ -30,7 +26,6 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
   const { effectiveTheme } = useTheme();
   const isDark = effectiveTheme === 'dark';
 
-  // Default to 'passkey' mode so user doesn't hit Firebase permission blocks
   const [mode, setMode] = useState<'passkey' | 'google' | 'email' | 'reset'>('passkey');
   const [email, setEmail] = useState('waelkirlous@gmail.com');
   const [password, setPassword] = useState('');
@@ -45,8 +40,6 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
   const [resetSent, setResetSent] = useState(false);
 
   const currentHostname = typeof window !== 'undefined' ? window.location.hostname : '';
-  const firebaseConsoleSettingsUrl =
-    'https://console.firebase.google.com/project/vaulted-byway-p6shk/authentication/settings';
 
   const handleCopyHostname = () => {
     navigator.clipboard.writeText(currentHostname);
@@ -66,7 +59,7 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
     if (success) {
       onSuccess();
     } else {
-      setError('Invalid passkey. Use your name: "waelkirlous" or "kirlous2026".');
+      setError('رمز المرور غير صحيح. يرجى التحقق وإعادة المحاولة.');
     }
   };
 
@@ -93,47 +86,6 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
       }
     } finally {
       setGoogleLoading(false);
-    }
-  };
-
-  const handleEmailSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setErrorType('general');
-    setLoading(true);
-
-    try {
-      if (mode === 'reset') {
-        await resetPassword(email);
-        setResetSent(true);
-      } else if (isSignup) {
-        if (password !== confirmPassword) {
-          throw new Error('Passwords do not match');
-        }
-        if (password.length < 6) {
-          throw new Error('Password must be at least 6 characters');
-        }
-        await signup(email, password);
-        onSuccess();
-      } else {
-        await login(email, password);
-        onSuccess();
-      }
-    } catch (err: any) {
-      console.error('Auth Error:', err);
-      let msg = err.message || 'Authentication error';
-      if (err.code === 'auth/unauthorized-domain') {
-        setErrorType('unauthorized-domain');
-        msg = 'Domain not authorized in Firebase Console.';
-      } else if (err.code === 'auth/operation-not-allowed') {
-        setErrorType('operation-not-allowed');
-        msg = 'Email/Password sign-in is not enabled in Firebase Console.';
-      } else if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
-        msg = 'Invalid credentials. Use Developer Passkey for instant login.';
-      }
-      setError(msg);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -164,7 +116,7 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
           </div>
 
           <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 font-mono text-[10px] font-bold text-emerald-400 border border-emerald-500/25">
-            AUTHENTICATED
+            SECURE
           </span>
         </div>
 
@@ -184,7 +136,7 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
               }`}
             >
               <Key className="h-3.5 w-3.5" />
-              <span>رمز المطور (Direct Passkey)</span>
+              <span>دخول المطور (Passkey)</span>
             </button>
 
             <button
@@ -200,24 +152,13 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
               }`}
             >
               <Globe className="h-3.5 w-3.5" />
-              <span>Google / Email</span>
+              <span>Google Account</span>
             </button>
           </div>
 
           {/* PRIMARY: Passkey / Quick Access Mode */}
           {mode === 'passkey' && (
             <div className="space-y-4">
-              {/* Permission Context Box */}
-              <div className="rounded-2xl border border-[#00A3FF]/20 bg-[#00A3FF]/5 p-4 text-xs text-slate-300 space-y-2">
-                <div className="flex items-center gap-2 text-[#00A3FF] font-bold">
-                  <Sparkles className="h-4 w-4" />
-                  <span>دخول المطور المعتمد (Owner Passkey)</span>
-                </div>
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  نظراً لأن المشروع السحابي مُهيّأ تلقائياً بأذونات أمنية مقفلة، يمكنك استخدام <strong>رمز المطور المباشر</strong> للدخول الفوري وإدارة كامل المشاريع وقواعد البيانات دون الحاجة لأذونات من لوحة Firebase.
-                </p>
-              </div>
-
               {/* Instant 1-Click Access for Kirlous */}
               <button
                 type="button"
@@ -230,10 +171,10 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
                   </div>
                   <div>
                     <div className="text-xs font-bold text-white group-hover:text-emerald-400 transition-colors">
-                      دخول فوري للمطور: waelkirlous@gmail.com
+                      دخول مباشر وفوري للمطور
                     </div>
                     <div className="font-mono text-[10px] text-slate-400">
-                      1-Click Instant Master Authentication
+                      waelkirlous@gmail.com
                     </div>
                   </div>
                 </div>
@@ -247,11 +188,11 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
               <div className="relative flex items-center justify-center my-2">
                 <div className="w-full border-t border-white/[0.08]" />
                 <span className="absolute px-3 font-mono text-[10px] uppercase tracking-wider bg-[#0B0C0E] text-slate-500">
-                  أو كتابة الرمز يدوياً
+                  أو كتابة رمز المرور
                 </span>
               </div>
 
-              {/* Passkey Input Form */}
+              {/* Passkey Input Form (Clean without secret hints) */}
               <form onSubmit={handleMasterKeySubmit} className="space-y-3">
                 <div>
                   <label className="block font-mono text-[11px] font-semibold uppercase tracking-wider mb-1 text-[#A1A1AA]">
@@ -263,7 +204,7 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
                       type="password"
                       value={masterKey}
                       onChange={e => setMasterKey(e.target.value)}
-                      placeholder="waelkirlous"
+                      placeholder="••••••••••••"
                       className={`w-full rounded-xl border pl-9 pr-4 py-2.5 text-xs shadow-xs focus:border-[#00A3FF] focus:outline-none transition-colors ${
                         isDark
                           ? 'border-white/[0.08] bg-[#111316] text-white placeholder-slate-500'
@@ -271,9 +212,6 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
                       }`}
                     />
                   </div>
-                  <p className="mt-1 font-mono text-[10px] text-slate-500">
-                    الرموز المقبولة: <code className="text-[#00A3FF]">waelkirlous</code> أو <code className="text-[#00A3FF]">kirlous2026</code>
-                  </p>
                 </div>
 
                 {error && (
@@ -353,7 +291,7 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
                         d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                       />
                     </svg>
-                    <span>Google Sign-In (waelkirlous@gmail.com)</span>
+                    <span>Google Sign-In</span>
                   </>
                 )}
               </button>
@@ -364,7 +302,7 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({ onSuccess, onCan
                   onClick={() => setMode('passkey')}
                   className="font-mono text-xs text-[#00A3FF] hover:underline"
                 >
-                  ← العودة لاستخدام الدخول الفوري السريع (Passkey)
+                  ← العودة لاستخدام الدخول الفوري السريع
                 </button>
               </div>
             </div>

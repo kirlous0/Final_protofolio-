@@ -4,7 +4,6 @@ import {
   getDocs,
   getDoc,
   setDoc,
-  updateDoc,
   deleteDoc,
   query,
   where,
@@ -57,7 +56,7 @@ async function safeFirestoreRead<T>(
     return result;
   } catch (err) {
     clearTimeout(timer);
-    console.warn(`[Firestore] Handled offline / read notice for ${operationName}:`, err);
+    console.warn(`[Firestore] Handled notice for ${operationName}:`, err);
     return fallback;
   }
 }
@@ -100,7 +99,6 @@ export async function seedFirestoreIfEmpty(): Promise<void> {
       }
     })();
 
-    // Do not block initial render for more than 2s
     await Promise.race([
       seedTask,
       new Promise(resolve => setTimeout(resolve, 2000)),
@@ -180,10 +178,11 @@ export async function getProjectBySlug(slug: string): Promise<Project | null> {
 
 export async function createProject(projectData: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<Project> {
   const newId = `proj-${Date.now()}`;
+  const existingProjects = await getProjects();
   const fullProject: Project = {
     ...projectData,
     id: newId,
-    order: (await getProjects()).length + 1,
+    order: existingProjects.length + 1,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -192,7 +191,7 @@ export async function createProject(projectData: Omit<Project, 'id' | 'createdAt
     await setDoc(doc(db, PROJECTS_COLLECTION, newId), fullProject);
     await logActivity('PROJECT_CREATED', 'project', newId, `Created project "${fullProject.title}" in Cloud Firestore.`);
   } catch (e) {
-    console.warn('Project created locally (remote sync deferred):', e);
+    console.warn('Project create sync notice:', e);
   }
   return fullProject;
 }
@@ -201,20 +200,26 @@ export async function updateProject(id: string, patch: Partial<Project>): Promis
   const docRef = doc(db, PROJECTS_COLLECTION, id);
   try {
     const snap = await getDoc(docRef);
-    if (!snap.exists()) return null;
+    let baseData: Partial<Project> = {};
+    if (snap.exists()) {
+      baseData = snap.data() as Project;
+    } else {
+      const existing = initialProjects.find(p => p.id === id);
+      if (existing) baseData = existing;
+    }
 
     const updated: Project = {
-      ...(snap.data() as Project),
+      ...(baseData as Project),
       ...patch,
       id,
       updatedAt: new Date().toISOString(),
     };
 
-    await updateDoc(docRef, updated as any);
+    await setDoc(docRef, updated, { merge: true });
     await logActivity('PROJECT_UPDATED', 'project', id, `Updated project "${updated.title}" in Cloud Firestore.`);
     return updated;
   } catch (e) {
-    console.warn('Update project failed on remote:', e);
+    console.warn('Update project fallback:', e);
     const existing = initialProjects.find(p => p.id === id);
     if (existing) {
       return { ...existing, ...patch, updatedAt: new Date().toISOString() };
@@ -228,28 +233,40 @@ export async function deleteProject(id: string): Promise<boolean> {
     const docRef = doc(db, PROJECTS_COLLECTION, id);
     await deleteDoc(docRef);
     await logActivity('PROJECT_DELETED', 'project', id, `Deleted project from Cloud Firestore.`);
+    return true;
   } catch (e) {
     console.warn('Delete project notice:', e);
+    return true;
   }
-  return true;
 }
 
 export async function toggleFeatureProject(id: string): Promise<Project | null> {
   try {
     const docRef = doc(db, PROJECTS_COLLECTION, id);
     const snap = await getDoc(docRef);
-    if (!snap.exists()) return null;
-    const current = snap.data() as Project;
+    let current: Project;
+    if (snap.exists()) {
+      current = snap.data() as Project;
+    } else {
+      current = initialProjects.find(p => p.id === id) || ({} as Project);
+    }
     const newFeatured = !current.featured;
-    await updateDoc(docRef, { featured: newFeatured, updatedAt: new Date().toISOString() });
+    const updated: Project = {
+      ...current,
+      id,
+      featured: newFeatured,
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(docRef, updated, { merge: true });
     await logActivity(
       newFeatured ? 'PROJECT_FEATURED' : 'PROJECT_UNFEATURED',
       'project',
       id,
-      `${newFeatured ? 'Featured' : 'Unfeatured'} project "${current.title}".`
+      `${newFeatured ? 'Featured' : 'Unfeatured'} project "${current.title || id}".`
     );
-    return { ...current, featured: newFeatured };
+    return updated;
   } catch (e) {
+    console.warn('Toggle feature notice:', e);
     return null;
   }
 }
@@ -272,7 +289,7 @@ export async function getSkills(): Promise<SkillCategory[]> {
 export async function updateSkills(categories: SkillCategory[]): Promise<SkillCategory[]> {
   try {
     for (const cat of categories) {
-      await setDoc(doc(db, SKILLS_COLLECTION, cat.id), cat);
+      await setDoc(doc(db, SKILLS_COLLECTION, cat.id), cat, { merge: true });
     }
     await logActivity('SKILLS_UPDATED', 'profile', undefined, 'Updated skills taxonomy in Cloud Firestore.');
   } catch (e) {
@@ -296,7 +313,7 @@ export async function getServices(): Promise<Service[]> {
 export async function updateServices(services: Service[]): Promise<Service[]> {
   try {
     for (const s of services) {
-      await setDoc(doc(db, SERVICES_COLLECTION, s.id), s);
+      await setDoc(doc(db, SERVICES_COLLECTION, s.id), s, { merge: true });
     }
     await logActivity('SERVICES_UPDATED', 'profile', undefined, 'Updated services offerings in Cloud Firestore.');
   } catch (e) {
@@ -341,7 +358,7 @@ export async function getMessages(): Promise<Message[]> {
 export async function updateMessageStatus(id: string, status: Message['status']): Promise<void> {
   try {
     const docRef = doc(db, MESSAGES_COLLECTION, id);
-    await updateDoc(docRef, { status });
+    await setDoc(docRef, { status }, { merge: true });
   } catch (e) {
     console.warn('Message status update notice:', e);
   }
@@ -396,7 +413,7 @@ export async function getScreenshotJobs(): Promise<ScreenshotJob[]> {
 export async function updateScreenshotJob(id: string, patch: Partial<ScreenshotJob>): Promise<void> {
   try {
     const docRef = doc(db, SCREENSHOTS_COLLECTION, id);
-    await updateDoc(docRef, patch as any);
+    await setDoc(docRef, patch as any, { merge: true });
   } catch (e) {
     console.warn('Screenshot job update notice:', e);
   }

@@ -12,6 +12,7 @@ import {
   Clock,
   User,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import { Message } from '../../types';
 import { api } from '../../lib/api';
@@ -32,6 +33,13 @@ export const AdminMessagesInbox: React.FC<AdminMessagesInboxProps> = ({
   const [copied, setCopied] = useState(false);
   const [draftReply, setDraftReply] = useState<string>('');
   const [generatingReply, setGeneratingReply] = useState(false);
+  const [messageToDelete, setMessageToDelete] = useState<Message | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   const filteredMessages = messages.filter(m => {
     if (filterStatus === 'all') return true;
@@ -57,20 +65,26 @@ export const AdminMessagesInbox: React.FC<AdminMessagesInboxProps> = ({
       if (selectedMessage && selectedMessage.id === id) {
         setSelectedMessage({ ...selectedMessage, status });
       }
+      showToast(`Status updated to ${status}`);
       onRefresh();
     } catch (e) {
-      alert('Failed to update status');
+      showToast('Failed to update status');
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this message?')) return;
+  const confirmDeleteMessage = async () => {
+    if (!messageToDelete) return;
+    const id = messageToDelete.id;
+    setMessageToDelete(null);
     try {
       await api.deleteMessage(id);
-      setSelectedMessage(null);
+      if (selectedMessage?.id === id) {
+        setSelectedMessage(null);
+      }
+      showToast('Message deleted');
       onRefresh();
     } catch (e) {
-      alert('Failed to delete message');
+      showToast('Failed to delete message');
     }
   };
 
@@ -90,7 +104,7 @@ export const AdminMessagesInbox: React.FC<AdminMessagesInboxProps> = ({
       );
       setDraftReply(response.reply);
     } catch (e) {
-      alert('Failed to generate AI reply draft');
+      showToast('Failed to generate AI reply draft');
     } finally {
       setGeneratingReply(false);
     }
@@ -98,6 +112,53 @@ export const AdminMessagesInbox: React.FC<AdminMessagesInboxProps> = ({
 
   return (
     <div id="admin-messages-tab" className="space-y-6">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-[#0c1017] px-4 py-3 text-xs font-semibold text-emerald-400 shadow-2xl backdrop-blur-md">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal (Iframe-Safe) */}
+      {messageToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl border border-red-500/30 bg-[#0c1017] p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/10 border border-red-500/30">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-sm">Delete Message?</h3>
+                <p className="text-[11px] text-slate-400">From {messageToDelete.name}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 bg-[#121622] p-3 rounded-xl border border-[#202738]">
+              Are you sure you want to remove this inquiry?
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setMessageToDelete(null)}
+                className="rounded-lg border border-[#232d40] bg-[#121723] px-4 py-2 text-xs font-medium text-slate-300 hover:bg-[#182030]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteMessage}
+                className="flex items-center gap-1.5 rounded-lg bg-red-500 px-4 py-2 text-xs font-bold text-white hover:bg-red-600 transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white">Contact & Inquiries Inbox</h2>
@@ -218,8 +279,9 @@ export const AdminMessagesInbox: React.FC<AdminMessagesInboxProps> = ({
                     Archive
                   </button>
                   <button
-                    onClick={() => handleDelete(selectedMessage.id)}
+                    onClick={() => setMessageToDelete(selectedMessage)}
                     className="p-1.5 text-red-400 hover:text-red-300"
+                    title="Delete Message"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -278,7 +340,7 @@ export const AdminMessagesInbox: React.FC<AdminMessagesInboxProps> = ({
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(draftReply);
-                          alert('Reply draft copied to clipboard!');
+                          showToast('Reply draft copied to clipboard!');
                         }}
                         className="flex items-center gap-1 rounded bg-[#161e2e] border border-[#27354a] px-3 py-1.5 text-xs text-slate-200 hover:text-white"
                       >
