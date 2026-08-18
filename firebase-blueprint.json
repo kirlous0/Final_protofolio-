@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "Profile": {
+      "collection": "profiles",
+      "fields": {
+        "name": { "type": "string", "description": "Full name of the engineer" },
+        "headline": { "type": "string", "description": "Professional title" },
+        "bio": { "type": "string", "description": "Full bio overview" },
+        "email": { "type": "string", "description": "Contact email" },
+        "githubUrl": { "type": "string", "description": "GitHub profile URL" },
+        "linkedinUrl": { "type": "string", "description": "LinkedIn profile URL" },
+        "twitterUrl": { "type": "string", "description": "Twitter / X profile URL" },
+        "location": { "type": "string", "description": "Location description" },
+        "availableForHire": { "type": "boolean", "description": "Availability flag" }
+      }
+    },
+    "Project": {
+      "collection": "projects",
+      "fields": {
+        "title": { "type": "string", "description": "Project title" },
+        "slug": { "type": "string", "description": "Unique URL slug" },
+        "shortDescription": { "type": "string", "description": "Brief summary" },
+        "longDescription": { "type": "string", "description": "Detailed case study" },
+        "problem": { "type": "string", "description": "Problem statement" },
+        "solution": { "type": "string", "description": "Engineering solution" },
+        "features": { "type": "array", "description": "Core features list" },
+        "technologies": { "type": "array", "description": "Stack items" },
+        "category": { "type": "string", "description": "Domain category" },
+        "platform": { "type": "string", "description": "Web, Android, Full Stack, or AI" },
+        "status": { "type": "string", "description": "published or draft" },
+        "githubUrl": { "type": "string", "description": "Source repo URL" },
+        "liveUrl": { "type": "string", "description": "Live deployment URL" },
+        "coverImage": { "type": "string", "description": "Main banner image URL" },
+        "featured": { "type": "boolean", "description": "Showcased on home" },
+        "order": { "type": "number", "description": "Display order" },
+        "tags": { "type": "array", "description": "Searchable tags" },
+        "gallery": { "type": "array", "description": "Screenshots and viewports" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "description": "Last updated timestamp" }
+      }
+    },
+    "SkillCategory": {
+      "collection": "skills",
+      "fields": {
+        "name": { "type": "string", "description": "Category name" },
+        "description": { "type": "string", "description": "Category overview" },
+        "skills": { "type": "array", "description": "List of skill objects" }
+      }
+    },
+    "Service": {
+      "collection": "services",
+      "fields": {
+        "title": { "type": "string", "description": "Service title" },
+        "description": { "type": "string", "description": "Service scope" },
+        "deliverables": { "type": "array", "description": "Deliverable list" },
+        "technologies": { "type": "array", "description": "Related tech stack" },
+        "icon": { "type": "string", "description": "Icon identifier" }
+      }
+    },
+    "Message": {
+      "collection": "messages",
+      "fields": {
+        "name": { "type": "string", "description": "Sender name" },
+        "email": { "type": "string", "description": "Sender email" },
+        "projectType": { "type": "string", "description": "Inquiry domain" },
+        "subject": { "type": "string", "description": "Message subject" },
+        "message": { "type": "string", "description": "Message body" },
+        "status": { "type": "string", "description": "unread, replied, or archived" },
+        "createdAt": { "type": "string", "description": "Submission timestamp" }
+      }
+    },
+    "ScreenshotJob": {
+      "collection": "screenshotJobs",
+      "fields": {
+        "projectId": { "type": "string", "description": "Associated project ID" },
+        "url": { "type": "string", "description": "Target website URL" },
+        "status": { "type": "string", "description": "queued, processing, completed, or failed" },
+        "progress": { "type": "number", "description": "Completion percentage 0-100" },
+        "stepName": { "type": "string", "description": "Current pipeline step" },
+        "capturedImages": { "type": "array", "description": "Generated viewport assets" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      }
+    },
+    "ActivityLog": {
+      "collection": "activityLogs",
+      "fields": {
+        "action": { "type": "string", "description": "Action performed" },
+        "entityType": { "type": "string", "description": "Entity category" },
+        "entityId": { "type": "string", "description": "Target entity ID" },
+        "details": { "type": "string", "description": "Human-readable description" },
+        "timestamp": { "type": "string", "description": "Event timestamp" }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Kirlous Wael — Engineering Portfolio & Control Center",
+  "description": "Production-grade personal portfolio platform and private control center for Kirlous Wael, Full Stack Web Developer & Android Developer, featuring AI project analysis, automated screenshot capture, quality audits, and portfolio optimization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
